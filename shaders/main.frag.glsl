@@ -325,11 +325,19 @@ void main() {
     // full color image. Accent-threshold recoloring still applies on top in
     // both modes (it's driven by luminance, which stays meaningful either way).
     vec3 baseFg = (uColorMode == 1) ? srcColor : uFgColor;
-    vec3 fg = baseFg;
-    if (biasedLumForAccent > uAccentThreshold) {
-      float t = smoothstep(uAccentThreshold, 1.0, biasedLumForAccent);
-      fg = mix(baseFg, uAccentColor, t);
-    }
+    // NOTE: this used to be `if (biasedLumForAccent > uAccentThreshold)` gating
+    // a smoothstep(uAccentThreshold, 1.0, ...) mix — a HARD on/off gate right
+    // at the threshold, before any blend even starts. Fine for a smooth,
+    // low-frequency source, but a source with real per-cell luminance
+    // variation near the threshold (e.g. a small emissive/AO-shaded shape
+    // where neighboring cells' luminance hops back and forth across 0.82)
+    // makes adjacent cells flip between 0% and a partial blend, reading as
+    // scattered accent/non-accent speckle instead of a coherent tint. A
+    // narrow symmetric band CENTERED on the threshold means neighboring
+    // cells with similar luminance get similar blend amounts instead of a
+    // step discontinuity right at the gate.
+    float accentBlend = smoothstep(uAccentThreshold - 0.08, uAccentThreshold + 0.08, biasedLumForAccent);
+    vec3 fg = mix(baseFg, uAccentColor, accentBlend);
     fg = mix(fg, uAccentColor, influence * 0.6);
 
     // contentMask forces genuinely empty background (3D sources only) to
@@ -392,10 +400,15 @@ void main() {
     float dotCoverage = 1.0 - smoothstep(radius - 0.06, radius, d);
 
     vec3 baseFg = (uColorMode == 1) ? srcColor : uFgColor;
+    // Same fix as the ASCII branch above: narrow symmetric band centered on
+    // the threshold instead of a hard if-gate, so neighboring dots whose
+    // luminance straddles uAccentThreshold blend smoothly instead of
+    // flipping between 0% and partial accent — see that branch's comment
+    // for the full "why" (checkered accent/non-accent speckle on sources
+    // with real per-cell luminance variation near the threshold).
+    float accentBlend = smoothstep(uAccentThreshold - 0.08, uAccentThreshold + 0.08, lAccent);
     vec3 fg = mix(baseFg, uAccentColor, influence * 0.6);
-    if (lAccent > uAccentThreshold) {
-      fg = mix(fg, uAccentColor, smoothstep(uAccentThreshold, 1.0, lAccent));
-    }
+    fg = mix(fg, uAccentColor, accentBlend);
 
     // contentMask forces genuinely empty background (3D sources only) to
     // flat uBgColor no matter what dot got picked — see uSourceIsMasked.
