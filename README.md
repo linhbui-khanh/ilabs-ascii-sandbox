@@ -44,8 +44,8 @@ page, bring the import map with them.
 
 ```
 index.html              page shell — canvas, import map, CDN script tags (pure canvas, no DOM demo elements)
-api/presets.js          Vercel Serverless Function — shared preset store (GET/PUT), backed by Vercel KV
-package.json            just declares @vercel/kv (the one dependency api/presets.js needs) — no build step
+api/presets.js          Vercel Serverless Function — shared preset store (GET/PUT), backed by Upstash Redis
+package.json            just declares @upstash/redis (the one dependency api/presets.js needs) — no build step
 js/main.js               Three.js scene, source pipeline, GUI wiring, render loop
 js/msdfAtlas.js           loads assets/msdf/atlas.png + atlas.json, converts to shader-ready glyph rects
 js/blueNoise.js           procedural blue-noise-ish texture generator (no downloaded asset needed)
@@ -352,7 +352,7 @@ video scrub position, which aren't "settings") under a name you choose:
   entries in the imported file win.
 
 **Shared, not per-browser:** presets are stored server-side (`api/presets.js`
-+ Vercel KV — see "Live / shared preset library" below), not `localStorage`.
++ Upstash Redis — see "Live / shared preset library" below), not `localStorage`.
 A preset one person saves shows up for everyone else on the team hitting the
 same deployed URL, since this is meant to be a shared tool. Running it
 locally via `npx serve .` (no Vercel dev server) will fail to save/load
@@ -367,12 +367,19 @@ Vercel with no extra config. What you need to set up once:
 1. **Push this folder to a GitHub repo** (if it isn't already), then in the
    Vercel dashboard: **Add New → Project → Import** that repo. Framework
    preset: "Other" (no build command needed — it's static files + `/api`).
-2. **Provision Vercel KV**: in the new project → **Storage** tab → **Create
-   Database → KV**. Connect it to this project when prompted — Vercel
-   auto-injects the `KV_REST_API_URL` / `KV_REST_API_TOKEN` env vars that
-   `api/presets.js` reads via `@vercel/kv`. You don't set these by hand.
-3. **Redeploy** (Vercel → Deployments → ⋯ → Redeploy) after connecting KV, so
-   the new env vars actually reach the function.
+2. **Provision Upstash Redis**: in the new project → **Storage** tab →
+   **Create Database** (or **Browse Storage**) → under **Marketplace
+   Database Providers**, pick **Upstash** ("Serverless DB: Redis, Vector,
+   Queue, Search") — NOT the "Redis" tile (that's a separate Redis Cloud
+   integration with different setup). Vercel's own native "KV" product was
+   retired in December 2024; Upstash is its direct successor and kept the
+   exact same env var names for drop-in compatibility. Create the database,
+   then connect it to this project when prompted — Vercel auto-injects the
+   `KV_REST_API_URL` / `KV_REST_API_TOKEN` env vars that `api/presets.js`
+   reads via `@upstash/redis`'s `Redis.fromEnv()`. You don't set these by
+   hand.
+3. **Redeploy** (Vercel → Deployments → ⋯ → Redeploy) after connecting
+   Upstash, so the new env vars actually reach the function.
 4. Share the deployment URL with the team. That's it — no accounts, no
    login, everyone hits the same shared preset store.
 
@@ -382,7 +389,7 @@ reach the shared preset store" alert (everything else in the tool works
 fine offline). Use `npx vercel dev` instead (from the Vercel CLI, `npm i -g
 vercel`, then `vercel link` once to connect this folder to the Vercel
 project) to run both the static site AND `api/presets.js` locally against
-the real KV store.
+the real Upstash store.
 
 **Known trade-offs (fine for an internal team tool, worth knowing):**
 
@@ -393,7 +400,7 @@ the real KV store.
   password/SSO protection (Project Settings → Deployment Protection) rather
   than trying to gate the API alone.
 - **Last-write-wins, no conflict resolution** — Save/Delete replaces the
-  whole store wholesale (`kv.set` overwrites everything). Two people saving
+  whole store wholesale (`redis.set` overwrites everything). Two people saving
   at almost the exact same moment can clobber each other's unrelated
   changes. Not a real risk in practice for occasional preset saves, but
   don't expect proper merge behavior.

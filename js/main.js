@@ -256,7 +256,7 @@ function setSourceImage(url, onReady) {
 // "experiments" (mode/color/mouse/3D combos) on the SAME canvas to compare,
 // instead of re-dialing every slider from memory each time.
 //
-// Backed by a shared server-side store (api/presets.js + Vercel KV) rather
+// Backed by a shared server-side store (api/presets.js + Upstash Redis) rather
 // than localStorage — a preset anyone on the team saves shows up for
 // everyone else too, since this is meant to be a shared team tool, not a
 // private one. See README "Live / shared preset library" for setup +
