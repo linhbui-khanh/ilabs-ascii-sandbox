@@ -14,6 +14,9 @@
 //   4 = Blue Noise (precomputed texture, uDitherScale controls tiling)
 //   5 = IGN (Interleaved Gradient Noise, procedural, no texture)
 //   6 = Random (deliberately bad baseline, for side-by-side comparison)
+//   7 = Smooth Dot (direct quantized luminance -> dot size, NO per-cell
+//       threshold at all — see that branch's comment for why this exists
+//       as a separate mode instead of a tweak to the Bayer/blue-noise ones)
 // ============================================================================
 
 precision highp float;
@@ -64,6 +67,7 @@ uniform float uAtlasPxRange;    // distanceField.distanceRange from the baked at
 // dithering
 uniform sampler2D uBlueNoiseTex;
 uniform float uDitherScale;     // blue-noise tiling scale (runtime slider, replaces fixed 1x/2x/0.5x presets)
+uniform float uDotLevels;       // "Smooth Dot" mode (uMode==7) — number of discrete dot-size steps
 
 // source aspect ratio (source pixel width / height) — see coverUv() below.
 // 1.0 for the 3D-rendered sources (their render target is always square).
@@ -357,6 +361,57 @@ void main() {
     // Good enough to read as "glow" in a sandbox; upgrade later if you want
     // actual light bleed.
     outColor += uAccentColor * uGlowStrength * smoothstep(uAccentThreshold - 0.15, 1.0, biasedLumForAccent) * coverage * contentMask;
+
+  } else if (uMode == 7) {
+    // ---------------- Smooth Dot (quantized, NO ordered-dither threshold) --
+    // Every mode in the `else` branch below compares luminance against a
+    // per-cell Bayer/blue-noise/IGN/random THRESHOLD — that's the definition
+    // of ordered/stochastic dithering, but it also means a cell's dot size
+    // depends partly on ITS OWN position in the threshold pattern, not just
+    // on the source's luminance. In a genuinely solid-toned region that
+    // shows up as a small percentage of cells reading a visibly different
+    // (usually smaller) dot than their identical neighbors — see the
+    // densityL/saturation-knee comments further down for the full story on
+    // that class of bug. This mode sidesteps it entirely: dot size is a
+    // direct, deterministic function of luminance, quantized into uDotLevels
+    // discrete steps (like a halftone printing plate) — two cells sampling
+    // the exact same luminance ALWAYS render the exact same dot, regardless
+    // of where they sit on screen. Trade-off: no per-pixel dither
+    // grain/texture — density changes are visible as distinct steps rather
+    // than a stochastic blend — which is why this is an ADDITIONAL mode,
+    // not a replacement for the Bayer/blue-noise ones below (those exist to
+    // demonstrate true ordered dithering; this one exists for a guaranteed-
+    // uniform halftone look).
+    float biasedLumForDot = clamp(lum + influence * 0.12, 0.0, 1.0);
+    float biasedLumForAccent = clamp(lum + influence * 0.35, 0.0, 1.0);
+    float l = uInvert > 0.5 ? 1.0 - biasedLumForDot : biasedLumForDot;
+    float lAccent = uInvert > 0.5 ? 1.0 - biasedLumForAccent : biasedLumForAccent;
+
+    // Same gamma-lift reasoning as densityL in the Bayer branch below: a
+    // mid-lit 3D source rarely reads much past ~0.5 luminance, so lifting it
+    // here keeps the quantized steps from bunching up entirely in the
+    // bottom half of the range.
+    float lifted = pow(l, 0.6);
+    float levels = max(uDotLevels, 2.0);
+    float quantized = floor(lifted * levels + 0.5) / levels;
+    float radius = mix(0.06, 0.48, quantized);
+
+    // Cell-size-aware edge softness: a small on-screen cell (few px) gets a
+    // softer dot edge so it doesn't alias into a hard jagged square; a large
+    // cell gets a crisp edge so the halftone reads as deliberate circles
+    // instead of a blurry blob — adapts to Cell size instead of using one
+    // fixed edge width for every value.
+    float edgeSoftness = mix(0.14, 0.035, smoothstep(6.0, 20.0, cell));
+    float d = length(cellUv - 0.5 - magnetOffset);
+    float dotCoverage = 1.0 - smoothstep(radius - edgeSoftness, radius, d);
+
+    vec3 baseFg = (uColorMode == 1) ? srcColor : uFgColor;
+    float accentBlend = smoothstep(uAccentThreshold - 0.08, uAccentThreshold + 0.08, lAccent);
+    vec3 fg = mix(baseFg, uAccentColor, influence * 0.6);
+    fg = mix(fg, uAccentColor, accentBlend);
+
+    outColor = mix(uBgColor, fg, dotCoverage * contentMask);
+    outColor += uAccentColor * uGlowStrength * smoothstep(uAccentThreshold - 0.15, 1.0, lAccent) * dotCoverage * contentMask;
 
   } else {
     // ---------------- dithering modes ----------------

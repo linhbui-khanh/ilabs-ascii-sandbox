@@ -27,6 +27,10 @@ const MODES = {
   "Blue Noise": 4,
   "IGN": 5,
   "Random (baseline)": 6,
+  // Direct quantized luminance -> dot size, no Bayer/blue-noise threshold at
+  // all — see this mode's branch in main.frag.glsl for why it exists
+  // alongside the ordered-dithering modes above rather than replacing them.
+  "Smooth Dot": 7,
 };
 
 // ---------------------------------------------------------------------------
@@ -317,7 +321,7 @@ const NO_PRESETS_LABEL = "— none saved —";
 // params.videoTime (playback position, not a setting).
 const PRESET_KEYS = [
   "mode", "cellSize", "invert", "colorMode", "fgColor", "bgColor", "accentColor",
-  "accentThreshold", "ditherScale", "brightness", "contrast", "blur", "glow",
+  "accentThreshold", "ditherScale", "dotLevels", "brightness", "contrast", "blur", "glow",
   "mouseRadius", "mouseStrength", "mouseSmoothing", "trailEnabled", "trailDecay",
   "trailStrength", "magnetEnabled", "magnetRadius", "magnetStrength",
   "autoRotate", "scale", "posX", "posY", "rotX", "rotY", "rotZ",
@@ -561,6 +565,7 @@ const params = {
   accentColor: "#ff451a",
   accentThreshold: 0.82,
   ditherScale: 1.0,
+  dotLevels: 8, // "Smooth Dot" mode (see MODES) — number of discrete dot-size steps
   brightness: 1.0,
   contrast: 1.0,
   blur: 0, // px, pre-blur on the source before density/coverage math
@@ -863,6 +868,7 @@ async function boot() {
     uAtlasPxRange: { value: atlas.distanceRange },
     uBlueNoiseTex: { value: blueNoiseTex },
     uDitherScale: { value: params.ditherScale },
+    uDotLevels: { value: params.dotLevels },
     uSourceAspect: { value: currentSourceAspect },
     // 1.0 for the 3D-rendered sources (spark/glb) — real alpha coverage from
     // the transparently-cleared render target; 0.0 for video/image, where
@@ -1013,6 +1019,9 @@ async function boot() {
   });
   modeFolder.add(params, "ditherScale", 0.25, 4, 0.05).name("Blue noise scale").onChange((v) => {
     uniforms.uDitherScale.value = v;
+  });
+  modeFolder.add(params, "dotLevels", 2, 16, 1).name("Dot levels (Smooth Dot)").onChange((v) => {
+    uniforms.uDotLevels.value = v;
   });
 
   const colorFolder = guiLook.addFolder("Color");
