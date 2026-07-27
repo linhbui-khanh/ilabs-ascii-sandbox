@@ -140,19 +140,6 @@ function clearSourceObject() {
   }
 }
 
-// Scramble reveal — plays whenever a source finishes (re-)loading. Uses its
-// own performance.now()-based clock instead of tick()'s internal `elapsed`,
-// since setSourceX below are module-level functions outside boot()'s tick()
-// closure — this keeps the reveal timer independent of anything happening
-// inside the render loop, and correctly plays even for undo/redo restores of
-// the SAME source (a real user action re-triggers it too, which is fine —
-// re-loading a source, even to the identical file, is exactly the moment
-// this effect is for).
-let revealStartTime = performance.now() / 1000;
-function triggerReveal() {
-  revealStartTime = performance.now() / 1000;
-}
-
 // Every setSourceX below takes an optional `onReady` callback, called once
 // the switch has actually taken effect (immediately for spark/video, after
 // the async load for image/glb) — this is what lets undo/redo (see "Undo /
@@ -161,9 +148,7 @@ function triggerReveal() {
 // Each one also calls pushHistory() itself at that same point, so a real user
 // action (clicking "reset to spark", uploading a file) and a history restore
 // both go through the exact same "source is ready" moment — pushHistory()
-// simply no-ops during a restore (see isRestoringHistory), and each one also
-// calls triggerReveal() at that point so switching sources always plays the
-// scramble-in transition.
+// simply no-ops during a restore (see isRestoringHistory).
 
 function setSourceSpark(onReady) {
   clearSourceObject();
@@ -174,7 +159,6 @@ function setSourceSpark(onReady) {
   sourceBaseScale = 1.0;
   sourceCenterOffset.set(0, 0); // pyramid geometry is already centered on its own origin
   pushHistory();
-  triggerReveal();
   onReady?.();
 }
 
@@ -209,7 +193,6 @@ function setSourceGLB(url, onReady) {
       currentSourceAspect = 1.0;
       lastGlbUrl = url;
       pushHistory();
-      triggerReveal();
       onReady?.();
     },
     undefined,
@@ -242,7 +225,6 @@ function setSourceVideo(url, onReady) {
   currentSourceType = "video";
   lastVideoUrl = url;
   pushHistory();
-  triggerReveal();
   onReady?.();
 }
 
@@ -264,7 +246,6 @@ function setSourceImage(url, onReady) {
     currentSourceType = "image";
     lastImageUrl = url;
     pushHistory();
-    triggerReveal();
     onReady?.();
   });
 }
@@ -292,7 +273,6 @@ const PRESET_KEYS = [
   "accentThreshold", "ditherScale", "brightness", "contrast", "blur", "glow",
   "mouseRadius", "mouseStrength", "mouseSmoothing", "trailEnabled", "trailDecay",
   "trailStrength", "magnetEnabled", "magnetRadius", "magnetStrength",
-  "revealEnabled", "revealDuration", "revealStagger",
   "autoRotate", "scale", "posX", "posY", "rotX", "rotY", "rotZ",
   "videoLoop", "includeGIF",
 ];
@@ -551,14 +531,6 @@ const params = {
   magnetEnabled: false,
   magnetRadius: 0.12,
   magnetStrength: 0.7,
-  // scramble reveal — plays once whenever a new source finishes loading
-  // (triggerReveal(), called from setSourceSpark/Video/Image/GLB). Off by
-  // default would make new sources pop in with no transition at all, which
-  // is the ONE case worth defaulting on, since it's the moment this effect
-  // is for — see README "Scramble reveal on source load".
-  revealEnabled: true,
-  revealDuration: 1.1, // seconds
-  revealStagger: 0.6, // 0..1 — how spread-out the per-cell settle timing is; 0 = every cell settles in lockstep
   autoRotate: true,
   scale: 0.7, // multiplies sourceBaseScale — default <1 so the spark reads smaller/tighter in frame
   posX: 0,
@@ -834,8 +806,6 @@ async function boot() {
     uMagnetEnabled: { value: params.magnetEnabled ? 1 : 0 },
     uMagnetRadius: { value: params.magnetRadius },
     uMagnetStrength: { value: params.magnetStrength },
-    uRevealProgress: { value: 1 },
-    uRevealStagger: { value: params.revealStagger },
     uAtlasTex: { value: atlas.texture },
     uGlyphRects: { value: atlas.glyphRects.concat(
       Array.from({ length: 16 - atlas.glyphRects.length }, () => new THREE.Vector4(0, 0, 0, 0))
@@ -995,15 +965,6 @@ async function boot() {
   modeFolder.add(params, "ditherScale", 0.25, 4, 0.05).name("Blue noise scale").onChange((v) => {
     uniforms.uDitherScale.value = v;
   });
-  // scramble reveal — plays whenever a source (re-)loads, see triggerReveal()
-  // and README "Scramble reveal on source load". revealDuration/Stagger only
-  // take effect on the NEXT reveal (uRevealProgress is already mid-flight
-  // otherwise), which is fine — you're tuning for next time, not this instant.
-  modeFolder.add(params, "revealEnabled").name("Scramble reveal on load");
-  modeFolder.add(params, "revealDuration", 0.1, 4, 0.05).name("Reveal duration (s)");
-  modeFolder.add(params, "revealStagger", 0, 1, 0.01).name("Reveal stagger").onChange((v) => {
-    uniforms.uRevealStagger.value = v;
-  });
 
   const colorFolder = guiLook.addFolder("Color");
   colorFolder.add(params, "colorMode", ["Grayscale", "RGB"]).name("Color mode").onChange((v) => {
@@ -1135,14 +1096,6 @@ async function boot() {
     const t = elapsed;
     uniforms.uTime.value = t;
     uniforms.uSourceAspect.value = currentSourceAspect;
-
-    // scramble reveal progress — its own performance.now()-based clock (see
-    // triggerReveal()), not the shader's `t`, so it stays correct regardless
-    // of anything happening inside this render loop.
-    const revealElapsed = performance.now() / 1000 - revealStartTime;
-    uniforms.uRevealProgress.value = params.revealEnabled
-      ? Math.min(1, revealElapsed / Math.max(params.revealDuration, 0.001))
-      : 1;
 
     // ease the reactive point toward the raw pointer instead of snapping to
     // it — frame-rate independent so it feels the same at 30fps or 144fps.

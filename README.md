@@ -189,29 +189,15 @@ output read as ASCII/dithering instead of a blurred video.
   driven by luminance) rather than a flat on/off fill — reads closer to a
   halftone than a checkerboard.
 
-## Scramble reveal on source load
-
-Whenever a source finishes (re-)loading — procedural pyramid, an uploaded
-video/image/`.glb`, or an undo/redo restore that switches source — every
-cell scrambles through random glyphs/dots and settles into the real image
-over `revealDuration` seconds, instead of just popping in. `triggerReveal()`
-in `main.js` stamps `revealStartTime` (its own `performance.now()` clock,
-independent of the shader's internal `uTime`) at that moment; `tick()` turns
-the elapsed time into `uRevealProgress` (0→1) every frame.
-
-Cells don't all settle on the same frame — `main.frag.glsl` gives each cell
-its own random delay (`cellRevealSeed * uRevealStagger`), so the reveal
-sweeps across the grid rather than crossfading uniformly, reading as a
-decode/materialize effect (the aesthetic this whole effect is aiming at —
-see the shortlisted `aino.agency` decode-to-photo reference). A cell that
-hasn't settled yet cycles through a randomized glyph/dot (reseeded ~12×/sec)
-instead of showing its real value.
-
-**Scramble reveal on load** / **Reveal duration (s)** / **Reveal stagger**
-in the **Effect** folder. `revealStagger = 0` makes every cell settle in
-lockstep (a flat crossfade); higher values spread the settle window wider.
-Changing duration/stagger only affects the NEXT reveal — one already in
-flight keeps its own timing.
+**Removed: Scramble reveal on source load.** Every cell used to cycle through
+a random glyph/dot and settle into the real image over `revealDuration`
+seconds whenever a source (re-)loaded, staggered per-cell via
+`cellRevealSeed * uRevealStagger` so the settle swept across the grid instead
+of crossfading uniformly. Pulled out (along with `revealEnabled`/
+`revealDuration`/`revealStagger`, `uRevealProgress`/`uRevealStagger`, and the
+"Scramble reveal on load" GUI controls) because the result didn't read as the
+intended decode/materialize effect. Sources now just pop in directly, same as
+before this was added.
 
 ## Magnet dots/glyphs (Mouse interaction folder)
 
@@ -632,9 +618,8 @@ actually spend most of a tuning session):
   mirror how Efecto and most premium editors separate ACTIONS you take once
   you're happy from SETTINGS you tune repeatedly — these are the actual
   triggers, always one click away without opening a folder.
-- **Effect** — mode dropdown, cell size, invert, blue-noise scale, scramble
-  reveal (see "Scramble reveal on source load" above; idle shimmer was
-  removed)
+- **Effect** — mode dropdown, cell size, invert, blue-noise scale (scramble
+  reveal on load and idle shimmer were both removed — see Known limitations)
 - **Color** — color mode, background/foreground/accent + accent luminance
   threshold
 - **Filters** — brightness/contrast/blur/glow (see "Color mode + filters"
@@ -734,6 +719,22 @@ automatically follow whatever's in `atlas.json`.
   void-and-cluster blue noise.
 - Per-glyph cursor-proximity scramble (phase b of the scramble-text spec) is
   designed but not implemented — see "Scramble text" above for the hook point.
+- **Dot flicker on video sources (Bayer/blue-noise/IGN/Random modes).** Real
+  video has a little frame-to-frame luminance jitter even on a static-looking
+  shot (sensor/codec noise). The dithering branch used a hard `step(threshold,
+  l)` to decide each cell's on/off — any cell whose luminance sat near its own
+  per-cell threshold flipped fully on↔off every time that jitter crossed the
+  line, visible as scattered per-dot sparkle inside the subject (confirmed by
+  diffing consecutive frames: zero change in flat/background regions, noise
+  concentrated only in the dithered content). Fixed by widening that to a
+  narrow `smoothstep(threshold - 0.035, threshold + 0.035, l)` band in
+  `main.frag.glsl`, so a threshold-crossing fades the dot in/out over a couple
+  of frames instead of popping — same underlying source noise, much less
+  perceptible. If it's still visible on very noisy footage, the next lever is
+  pre-blurring the source more (`Blur` slider) or a proper temporal fix
+  (exponential-moving-average the per-cell luminance across frames via a
+  ping-pong accumulation buffer, same pattern as the cursor trail buffer) —
+  not implemented since the smoothstep band was enough for the reported case.
 - No mobile/touch testing done yet — `pointermove` is wired, but touch
   devices won't have a persistent "hover" position; decide on a touch
   fallback (e.g. last-touch-point with a timeout) before shipping.

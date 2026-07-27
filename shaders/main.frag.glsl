@@ -46,14 +46,6 @@ uniform float uMagnetEnabled;   // 0.0 or 1.0
 uniform float uMagnetRadius;    // uv units, aspect-corrected same as uMouseRadius
 uniform float uMagnetStrength;  // 0..1
 
-// scramble reveal — plays once whenever a new source finishes loading (see
-// triggerReveal() in main.js). uRevealProgress runs 0 -> 1 over
-// params.revealDuration seconds; uRevealStagger spreads WHEN each cell
-// settles across that window instead of every cell settling in lockstep —
-// see README "Scramble reveal on source load".
-uniform float uRevealProgress;  // 0..1
-uniform float uRevealStagger;   // 0..1
-
 // ASCII / MSDF atlas
 uniform sampler2D uAtlasTex;
 uniform vec4  uGlyphRects[16];  // (u0, v0, u1, v1) per glyph, in charset order (dense -> sparse)
@@ -280,19 +272,6 @@ void main() {
   vec2 magnetDir = towardMouseLen > 0.0001 ? towardMousePx / towardMouseLen : vec2(0.0);
   vec2 magnetOffset = magnetDir * magnetFalloff * uMagnetStrength * 0.45;
 
-  // ---- scramble reveal: cells settle in one by one, not all at once -------
-  // Each cell gets its own random "delay" fraction of the total reveal
-  // window (via cellRevealSeed), so the settle sweeps across the grid
-  // instead of every cell locking in on the same frame — reads as a
-  // decode/materialize effect rather than a flat crossfade.
-  float cellRevealSeed = randomNoise(cellId * 1.7 + 11.0);
-  float cellDelay = cellRevealSeed * uRevealStagger;
-  float cellReveal = clamp((uRevealProgress - cellDelay) / max(1.0 - cellDelay, 0.0001), 0.0, 1.0);
-  bool revealed = cellReveal >= 1.0;
-  // changes several times a second, per cell — the flicker a not-yet-settled
-  // cell cycles through before locking into its real glyph/dot.
-  float scrambleSeed = randomNoise(cellId * 2.3 + floor(uTime * 12.0));
-
   vec3 outColor;
 
   if (uMode == 0) {
@@ -317,12 +296,7 @@ void main() {
     // shape the way clamping the glyph INDEX itself does.
     float biasedLumForGlyph = clamp(lum + influence * 0.12, 0.0, 1.0);
     float biasedLumForAccent = clamp(lum + influence * 0.35, 0.0, 1.0);
-    int realIdx = glyphIndexFromLuminance(biasedLumForGlyph);
-    // scramble reveal: not-yet-settled cells cycle through a random glyph
-    // instead of showing their real one — see the shared prep block above.
-    int scrambledIdx = int(floor(scrambleSeed * float(uGlyphCount)));
-    scrambledIdx = scrambledIdx < 0 ? 0 : (scrambledIdx > uGlyphCount - 1 ? uGlyphCount - 1 : scrambledIdx);
-    int idx = revealed ? realIdx : scrambledIdx;
+    int idx = glyphIndexFromLuminance(biasedLumForGlyph);
     vec4 rect = getGlyphRect(idx);
     // magnet offset shifts WHERE inside the glyph atlas cell we sample from —
     // clamped so it can't sample past this glyph's own atlas rect into a
@@ -383,13 +357,21 @@ void main() {
     // dot-matrix look: within the cell, draw a circular dot whose radius is
     // driven by luminance vs. threshold, rather than a flat on/off fill —
     // reads closer to a halftone than a binary Bayer checkerboard.
-    float realOn = step(threshold, l);
-    float realRadius = mix(0.08, 0.46, l) * realOn;
-    // scramble reveal: not-yet-settled cells flicker through a random
-    // on/off + radius instead of their real value — see prep block above.
-    float scrambleOn = step(0.5, scrambleSeed);
-    float scrambleRadius = mix(0.08, 0.46, scrambleSeed) * scrambleOn;
-    float radius = revealed ? realRadius : scrambleRadius;
+    //
+    // NOTE: this is a smoothstep BAND around the threshold, not step()'s hard
+    // on/off. Real video always has a little frame-to-frame luminance jitter
+    // (sensor/codec noise) even on a "static" held pose. With a hard step(),
+    // any cell whose luminance sits near its own Bayer/blue-noise/IGN
+    // threshold flips fully on <-> off every time that jitter crosses the
+    // line — that's the per-dot "chớp chớp" flicker/sparkle scattered across
+    // the subject (confirmed by diffing consecutive frames: near-zero change
+    // in flat/background regions, sparse scattered flips only inside the
+    // dithered content). A narrow transition band turns each flip into a
+    // quick fade instead of a hard pop, which reads as far less noisy even
+    // though the underlying source noise is unchanged. See README "Known
+    // limitations — dot flicker on video sources".
+    float on = smoothstep(threshold - 0.035, threshold + 0.035, l);
+    float radius = mix(0.08, 0.46, l) * on;
     // magnet offset shifts the dot's effective center within the cell.
     float d = length(cellUv - 0.5 - magnetOffset);
     float dotCoverage = 1.0 - smoothstep(radius - 0.06, radius, d);
