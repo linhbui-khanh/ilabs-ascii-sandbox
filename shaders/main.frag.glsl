@@ -345,10 +345,21 @@ void main() {
     // where neighboring cells' luminance hops back and forth across 0.82)
     // makes adjacent cells flip between 0% and a partial blend, reading as
     // scattered accent/non-accent speckle instead of a coherent tint. A
-    // narrow symmetric band CENTERED on the threshold means neighboring
-    // cells with similar luminance get similar blend amounts instead of a
-    // step discontinuity right at the gate.
-    float accentBlend = smoothstep(uAccentThreshold - 0.08, uAccentThreshold + 0.08, biasedLumForAccent);
+    // narrow band means neighboring cells with similar luminance get similar
+    // blend amounts instead of a step discontinuity right at the gate.
+    //
+    // NOTE: the band starts AT uAccentThreshold and extends upward (not
+    // centered on it) — a centered band means the reachable maximum input
+    // (1.0) always sits INSIDE the band once uAccentThreshold is pushed
+    // past ~0.92, so cranking the slider to its max (1.0) could never fully
+    // gate accent off (biasedLumForAccent tops out at 1.0, right in the
+    // middle of a centered band, giving ~50% blend instead of 0%) — caught
+    // live: user set Accent threshold=1.0 expecting "no accent at all" and
+    // still saw accent-tinted cells. Starting the band exactly at the
+    // threshold fixes that: smoothstep(edge0, _, x) is 0 for any x <= edge0,
+    // so at uAccentThreshold=1.0, biasedLumForAccent's max of 1.0 lands
+    // exactly on edge0 and correctly yields zero.
+    float accentBlend = smoothstep(uAccentThreshold, uAccentThreshold + 0.16, biasedLumForAccent);
     vec3 fg = mix(baseFg, uAccentColor, accentBlend);
     fg = mix(fg, uAccentColor, influence * 0.6);
 
@@ -406,7 +417,12 @@ void main() {
     float dotCoverage = 1.0 - smoothstep(radius - edgeSoftness, radius, d);
 
     vec3 baseFg = (uColorMode == 1) ? srcColor : uFgColor;
-    float accentBlend = smoothstep(uAccentThreshold - 0.08, uAccentThreshold + 0.08, lAccent);
+    // Band starts AT uAccentThreshold, not centered on it — see the ASCII
+    // branch's comment above for why: a centered band can never fully gate
+    // accent off even at the slider's max (1.0), since the reachable
+    // luminance ceiling (1.0) would sit inside the band instead of at/past
+    // its lower edge.
+    float accentBlend = smoothstep(uAccentThreshold, uAccentThreshold + 0.16, lAccent);
     vec3 fg = mix(baseFg, uAccentColor, influence * 0.6);
     fg = mix(fg, uAccentColor, accentBlend);
 
@@ -513,13 +529,15 @@ void main() {
     float dotCoverage = 1.0 - smoothstep(radius - 0.06, radius, d);
 
     vec3 baseFg = (uColorMode == 1) ? srcColor : uFgColor;
-    // Same fix as the ASCII branch above: narrow symmetric band centered on
-    // the threshold instead of a hard if-gate, so neighboring dots whose
+    // Same fix as the ASCII branch above: band starts AT uAccentThreshold
+    // and extends upward (not centered), so neighboring dots whose
     // luminance straddles uAccentThreshold blend smoothly instead of
-    // flipping between 0% and partial accent — see that branch's comment
-    // for the full "why" (checkered accent/non-accent speckle on sources
-    // with real per-cell luminance variation near the threshold).
-    float accentBlend = smoothstep(uAccentThreshold - 0.08, uAccentThreshold + 0.08, lAccent);
+    // flipping between 0% and partial accent (see that branch's comment for
+    // the full "why" — checkered accent/non-accent speckle on sources with
+    // real per-cell luminance variation near the threshold), AND so pushing
+    // the slider to its max (1.0) actually gates accent off completely
+    // instead of leaving a ~50% blend on the brightest cells.
+    float accentBlend = smoothstep(uAccentThreshold, uAccentThreshold + 0.16, lAccent);
     vec3 fg = mix(baseFg, uAccentColor, influence * 0.6);
     fg = mix(fg, uAccentColor, accentBlend);
 
