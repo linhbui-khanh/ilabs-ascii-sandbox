@@ -437,7 +437,21 @@ void main() {
     // dithering (varied dot size) is preserved for l below that knee, where
     // the source is actually transitioning tone (real edges/shading/AO).
     densityL = max(densityL, smoothstep(0.55, 0.8, l));
-    float on = smoothstep(threshold - 0.035, threshold + 0.035, densityL);
+    // Even with densityL pinned at a hard 1.0 above, a residual ~3% of cells
+    // still read as a visibly smaller dot in a solid-toned region (confirmed
+    // live: disabling mouse trail/strength entirely made zero difference to
+    // where these sit, so it isn't cursor-trail related — it's deterministic
+    // per-cell). Reason: Bayer 16x16 has thresholds up to ~0.996, and the
+    // flicker-safe smoothstep BAND above (±0.035, from the very first fix
+    // this session) is centered ON the threshold — so for a cell whose own
+    // threshold sits within ~0.035 of the max (roughly the top 3% of the
+    // tile), even densityL == 1.0 exactly still lands INSIDE that cell's
+    // band rather than past its top edge, so `on` comes out partial instead
+    // of a full 1.0. Explicitly forcing on = 1.0 once densityL has already
+    // saturated (the >= 0.999 check below) closes that last gap without
+    // touching the band's behavior for any cell that's still genuinely
+    // dithering (densityL < 1).
+    float on = densityL >= 0.999 ? 1.0 : smoothstep(threshold - 0.035, threshold + 0.035, densityL);
     float radius = mix(0.08, 0.46, densityL) * on;
     // magnet offset shifts the dot's effective center within the cell.
     float d = length(cellUv - 0.5 - magnetOffset);
