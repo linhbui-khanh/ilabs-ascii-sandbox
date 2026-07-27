@@ -716,6 +716,14 @@ automatically follow whatever's in `atlas.json`.
 
 ## Known limitations / next steps
 
+- Rotation (`rotX/Y/Z` + auto-rotate) spins the model around its OWN origin,
+  not its bounding-box center — for most uploaded character/prop models
+  (origin at the feet, or at world origin) this means it visually orbits
+  around that point rather than spinning in place. Centering (position) is
+  correct regardless — see `sourceCenterOffset` in `main.js` — but true
+  rotate-around-center would need the same offset applied before rotation,
+  not just before scale. Not fixed yet since it's more noticeable on tall/
+  offset-origin uploads than on the default pyramid or typical hero assets.
 - Uploaded `.glb` models with genuinely transparent/translucent materials
   will have that transparency read as "empty background" by the alpha
   content-mask and fade toward `uBgColor` instead of rendering as ink — see

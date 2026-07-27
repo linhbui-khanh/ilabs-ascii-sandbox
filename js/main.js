@@ -119,6 +119,15 @@ let currentSourceAspect = 1.0;
 // "Scale" GUI slider (params.scale) multiplies on TOP of this in tick(),
 // rather than replacing it, so uploads still fit sanely regardless of slider value.
 let sourceBaseScale = 1.0;
+// Raw (UNSCALED) local-space offset from the source's own origin to its
+// bounding-box center — (0, 0) for the procedural spark (built symmetric
+// around its own origin already), or computed per-upload for a .glb. Kept
+// separate from sourceObject.position/scale rather than baked into position
+// once at load time, because tick() sets position.x/y and scale every
+// single frame from params.posX/posY/scale — a one-time position offset
+// computed at load gets silently overwritten the very next frame. See the
+// centering math in tick() below for how this actually gets applied.
+let sourceCenterOffset = new THREE.Vector2(0, 0);
 
 function clearSourceObject() {
   if (sourceObject) {
@@ -163,6 +172,7 @@ function setSourceSpark(onReady) {
   currentSourceType = "spark";
   currentSourceAspect = 1.0;
   sourceBaseScale = 1.0;
+  sourceCenterOffset.set(0, 0); // pyramid geometry is already centered on its own origin
   pushHistory();
   triggerReveal();
   onReady?.();
@@ -183,9 +193,17 @@ function setSourceGLB(url, onReady) {
       box.getSize(size);
       const maxDim = Math.max(size.x, size.y, size.z) || 1;
       sourceBaseScale = 2.2 / maxDim;
+      // RAW local-space center — deliberately NOT multiplied by sourceBaseScale
+      // and NOT applied to .position here (previous version did both, and got
+      // silently overwritten by tick()'s per-frame position.x/y assignment
+      // anyway — see sourceCenterOffset's declaration comment above). Most
+      // uploaded character/prop models have their origin at the feet or at
+      // world origin, not their geometric center, so without this the model
+      // renders off-center (often cropped) the moment params.scale isn't
+      // exactly 1.0 — which it isn't by default (0.7).
       const center = new THREE.Vector3();
       box.getCenter(center);
-      sourceObject.position.sub(center.multiplyScalar(sourceBaseScale));
+      sourceCenterOffset.set(center.x, center.y);
       sourceScene.add(sourceObject);
       currentSourceType = "glb";
       currentSourceAspect = 1.0;
@@ -1166,9 +1184,18 @@ async function boot() {
           rotZBase
         );
 
-        sourceObject.position.x = params.posX;
-        sourceObject.position.y = params.posY;
-        sourceObject.scale.setScalar(sourceBaseScale * params.scale);
+        // Centering math recomputed every frame (not baked in once at load
+        // time) so it stays correct as params.scale changes — sourceObject's
+        // world position for its own bounding-box center works out to
+        // position + scale*sourceCenterOffset, so we solve for the position
+        // that puts that center at (params.posX, params.posY) instead of at
+        // wherever the model's own origin happens to be. See
+        // sourceCenterOffset's declaration comment for why this can't just
+        // be set once in setSourceGLB() the way an earlier version tried.
+        const effectiveScale = sourceBaseScale * params.scale;
+        sourceObject.position.x = params.posX - sourceCenterOffset.x * effectiveScale;
+        sourceObject.position.y = params.posY - sourceCenterOffset.y * effectiveScale;
+        sourceObject.scale.setScalar(effectiveScale);
       }
       renderer.setRenderTarget(renderTarget);
       renderer.render(sourceScene, sourceCamera);
