@@ -418,6 +418,25 @@ void main() {
     // sensible out-of-the-box default — Brightness/Contrast still work on
     // top of this for further manual tuning per source.
     float densityL = pow(l, 0.6);
+    // Saturating knee on top of the gamma above — without this, a REAL solid
+    // fill (e.g. deep inside the procedural pyramid's front facet, a single
+    // flat-shaded surface under uniform lighting) still shows a scattered
+    // handful of visibly smaller/missing dots: reported as "các dot không
+    // đều nhau" (the dots aren't uniform) with specific cells circled inside
+    // an otherwise-uniform dense region. Cause: even after the gamma lift,
+    // densityL asymptotically approaches but never quite reaches 1.0, and
+    // Bayer/blue-noise thresholds are near-uniformly distributed over
+    // 0..1 — so the small minority of cells whose OWN threshold happens to
+    // land above densityL (the top ~10-15% of the 64-cell Bayer tile, when
+    // densityL sits around 0.85-0.9) still read as partial/off, even though
+    // every cell is sampling the exact same flat, evenly-lit color. Once
+    // densityL is "clearly bright enough" (>= ~0.8), pushing it the rest of
+    // the way to a hard 1.0 makes on/radius pass for every cell regardless
+    // of its Bayer position, so a genuinely solid-toned region renders as a
+    // uniform field of full-size dots instead of a dithered gradient — true
+    // dithering (varied dot size) is preserved for l below that knee, where
+    // the source is actually transitioning tone (real edges/shading/AO).
+    densityL = max(densityL, smoothstep(0.55, 0.8, l));
     float on = smoothstep(threshold - 0.035, threshold + 0.035, densityL);
     float radius = mix(0.08, 0.46, densityL) * on;
     // magnet offset shifts the dot's effective center within the cell.
