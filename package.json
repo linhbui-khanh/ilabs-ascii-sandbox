@@ -1,0 +1,13 @@
+{
+  "name": "ilabs-ascii-shader-sandbox",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ASCII / glyph-dither shader sandbox — static frontend + one Vercel serverless function (api/presets.js) for the shared preset library. See README.md.",
+  "scripts": {
+    "dev": "npx serve ."
+  },
+  "dependencies": {
+    "@vercel/kv": "^1.0.1"
+  }
+}

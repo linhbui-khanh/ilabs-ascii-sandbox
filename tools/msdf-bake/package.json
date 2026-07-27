@@ -1,0 +1,9 @@
+{
+  "name": "msdf-bake",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Node script that bakes a JetBrains Mono MSDF atlas from bake.mjs. Run: npm install, then node bake.mjs <font.ttf> <charset.txt> <outDir> [fontSize] [texW,texH] [fieldRange]",
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
+}

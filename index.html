@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ASCII / Glyph-Dither Shader Sandbox</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      /* matches the shader's default params.bgColor/fgColor (js/main.js) —
+         keeps the page background consistent before the canvas paints its
+         first frame, instead of flashing the old dark theme then swapping. */
+      --bg: #F8F8F6;
+      --fg: #141413;
+      --accent: #ff451a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: var(--bg); color: var(--fg);
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      overflow: hidden;
+    }
+    #gl-canvas {
+      position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+    }
+    #boot-error {
+      display: none;
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      background: #400; color: #fff; padding: 10px 14px;
+      font-size: 12px; border-radius: 4px; z-index: 999;
+    }
+    input[type="file"] { display: none; }
+    .lil-gui { --width: 300px; }
+    /* Two docked GUI panels instead of one long scrolling column — see
+       js/main.js's "GUI" section (guiSession / guiLook) for what lives in
+       each. Both fixed to the full viewport height and independently
+       scrollable, since either one can still grow taller than the screen on
+       a small laptop display. */
+    #gui-left, #gui-right {
+      position: fixed;
+      top: 0;
+      max-height: 100vh;
+      overflow-y: auto;
+      z-index: 20;
+    }
+    #gui-left { left: 0; }
+    #gui-right { right: 0; }
+  </style>
+</head>
+<body>
+  <canvas id="gl-canvas"></canvas>
+
+  <div id="boot-error"></div>
+  <div id="gui-left"></div>
+  <div id="gui-right"></div>
+
+  <!-- One combined picker instead of a separate input per source type — the
+       "Upload Media" button (Source folder) opens this and js/main.js routes
+       the picked file to setSourceVideo/Image/GLB by its extension/MIME type
+       (see routeUploadedFile()). OBJ/STL aren't wired in — this project only
+       ever built a GLTFLoader path — but could be added the same way with
+       three's OBJLoader/STLLoader if you need those formats too. -->
+  <input type="file" id="media-input" accept="video/*,image/*,.glb,.gltf" />
+  <input type="file" id="preset-input" accept="application/json,.json" />
+
+  <!-- Three.js itself is loaded as an ES module inside js/main.js (import * as THREE from ".../three.module.js") —
+       no separate <script> tag needed here. The import map below is required because the
+       official GLTFLoader.js example (from the three@0.128.0 npm package itself, not something
+       we wrote) imports Three via the BARE specifier `import ... from "three"` instead of a
+       relative/full URL — without this map, the browser can't resolve that bare "three" and
+       throws "Failed to resolve module specifier 'three'". -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js"
+    }
+  }
+  </script>
+  <!-- js/magnetism.js (DOM "magnetic hover" technique) is kept in the project as reference code
+       for the REAL idea-shape elements on the live Webflow hero, but is not wired in here —
+       this sandbox stays pure-canvas. The 3D source's own "Source magnetism" (3D Transform
+       folder in js/main.js) is the version of this idea that actually belongs in this tool,
+       since it pulls the rendered shape itself rather than needing placeholder DOM boxes.
+       To try the DOM version here: add elements with a `.magnetic` class and call
+       `initMagnetism(".magnetic", {...})` from js/magnetism.js. See README "Cursor magnetism". -->
+
+  <!-- GSAP + ScrambleTextPlugin (js/scrambleText.js) are kept in the project as the "phase (a)"
+       scramble-text module from the spec, but are not wired into this canvas-only demo view —
+       there's no DOM headline/CTA here anymore to scramble. Add back:
+         <script src="https://cdn.jsdelivr.net/npm/gsap-trial@3.13.0/dist/gsap.min.js"></script>
+         <script src="https://cdn.jsdelivr.net/npm/gsap-trial@3.13.0/dist/ScrambleTextPlugin.min.js"></script>
+       plus a `[data-scramble]` element and the `initScrambleText()` call in js/main.js, if/when you
+       want the hero headline demo back. See README "Scramble text" + the note on gsap-trial's
+       licensing before using it anywhere but localhost. -->
+
+  <!-- gif.js: client-side GIF encoder, used by the "Also capture GIF" export
+       option in js/main.js. Loaded as a classic global (window.GIF), not a
+       module — its own internal Worker is spun up from a same-origin blob:
+       URL that main.js builds at record time (see getGifWorkerBlobUrl()),
+       NOT from this CDN URL directly, because browsers block a Worker
+       script loaded cross-origin (same restriction the MSDF atlas baking
+       step hit earlier with @zappar/msdf-generator — see
+       tools/msdf-bake/README.md for that story). -->
+  <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
