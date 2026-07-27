@@ -311,7 +311,15 @@ void main() {
     // shape the way clamping the glyph INDEX itself does.
     float biasedLumForGlyph = clamp(lum + influence * 0.12, 0.0, 1.0);
     float biasedLumForAccent = clamp(lum + influence * 0.35, 0.0, 1.0);
-    int idx = glyphIndexFromLuminance(biasedLumForGlyph);
+    // Density gamma (<1 brightens midtones) — see the identical comment in
+    // the dithering branch below for why this exists: a mid-lit 3D source
+    // (fixed ambient+directional + AO vertex colors) rarely reads much past
+    // ~0.4-0.5 luminance, which glyphIndexFromLuminance would otherwise read
+    // as "should be a sparse glyph" almost everywhere. Applied only to the
+    // glyph-selection input, not biasedLumForAccent, so the accent highlight
+    // stays a tight highlight instead of spreading with it.
+    float densityLumForGlyph = pow(biasedLumForGlyph, 0.6);
+    int idx = glyphIndexFromLuminance(densityLumForGlyph);
     vec4 rect = getGlyphRect(idx);
     // magnet offset shifts WHERE inside the glyph atlas cell we sample from —
     // clamped so it can't sample past this glyph's own atlas rect into a
@@ -393,8 +401,25 @@ void main() {
     // quick fade instead of a hard pop, which reads as far less noisy even
     // though the underlying source noise is unchanged. See README "Known
     // limitations — dot flicker on video sources".
-    float on = smoothstep(threshold - 0.035, threshold + 0.035, l);
-    float radius = mix(0.08, 0.46, l) * on;
+    // Density gamma (<1 brightens midtones) — the dot on/off compare below
+    // is a straight l-vs-Bayer/blue-noise-threshold test, and for a mid-lit
+    // 3D source (fixed ambient(0.5)+directional(1.0) lighting on a ~0.5
+    // albedo material, further darkened by the AO vertex-color bake) `l`
+    // rarely gets much past ~0.4-0.5 across most of the surface. Since a
+    // uniformly-distributed Bayer/blue-noise threshold is < l only ~40-50%
+    // of the time at that level, roughly HALF the cells land "off" (zero
+    // radius, i.e. pure background) even on what should read as a fairly
+    // solid mid-tone — reported as "còn nhiều đốm trắng" (too much white
+    // showing through what should be solid). Confirmed live: cranking the
+    // Brightness slider to ~1.6 filled the coverage back in, but that also
+    // pushes lAccent past uAccentThreshold across the same area, turning a
+    // tight highlight into a blanket recolor. Applying the gamma HERE only
+    // (not to lAccent below) fixes density without that side effect, as a
+    // sensible out-of-the-box default — Brightness/Contrast still work on
+    // top of this for further manual tuning per source.
+    float densityL = pow(l, 0.6);
+    float on = smoothstep(threshold - 0.035, threshold + 0.035, densityL);
+    float radius = mix(0.08, 0.46, densityL) * on;
     // magnet offset shifts the dot's effective center within the cell.
     float d = length(cellUv - 0.5 - magnetOffset);
     float dotCoverage = 1.0 - smoothstep(radius - 0.06, radius, d);
