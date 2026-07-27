@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Favicon concept: a mini halftone/dither swatch, literally what this
+       tool renders (dot radius growing with "luminance"), instead of an
+       arbitrary logo mark. Dark bg matches the sandbox's fg color
+       (#141413), dots use the sandbox's accent color (#ff451a). -->
+  <rect width="32" height="32" rx="6" fill="#141413"/>
+  <circle cx="9"  cy="9"  r="1.4" fill="#ff451a"/>
+  <circle cx="16" cy="9"  r="2.1" fill="#ff451a"/>
+  <circle cx="23" cy="9"  r="2.8" fill="#ff451a"/>
+  <circle cx="9"  cy="16" r="2.1" fill="#ff451a"/>
+  <circle cx="16" cy="16" r="2.8" fill="#ff451a"/>
+  <circle cx="23" cy="16" r="3.5" fill="#ff451a"/>
+  <circle cx="9"  cy="23" r="2.8" fill="#ff451a"/>
+  <circle cx="16" cy="23" r="3.5" fill="#ff451a"/>
+  <circle cx="23" cy="23" r="4.2" fill="#ff451a"/>
+</svg>

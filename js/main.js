@@ -1,5 +1,10 @@
 import * as THREE from "three"; // resolved via the import map in index.html
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js";
+// Real bloom for the 3D source (see "Bloom" section below) — same three@0.128.0
+// version as GLTFLoader above, official examples/jsm addons, not something we wrote.
+import { EffectComposer } from "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/postprocessing/UnrealBloomPass.js";
 import GUI from "https://cdn.jsdelivr.net/npm/lil-gui@0.19/dist/lil-gui.esm.js";
 import { loadMSDFAtlas } from "./msdfAtlas.js";
 import { generateBlueNoiseCanvas } from "./blueNoise.js";
@@ -61,6 +66,48 @@ let renderTarget = new THREE.WebGLRenderTarget(1024, 1024, {
   magFilter: THREE.LinearFilter,
   format: THREE.RGBAFormat,
 });
+
+// ---------------------------------------------------------------------------
+// Bloom — real soft light-bleed around bright/emissive parts of the 3D
+// source (e.g. a glowing .glb accent, like a star), instead of the shader's
+// old per-cell "Glow" brighten (a flat emissive boost on hot ASCII/dither
+// cells with zero spatial spread — see main.frag.glsl's outColor glow term).
+// That per-cell version is KEPT as-is for video/image sources (no 3D scene
+// to bloom there), but for spark/glb sources this gives the same "Glow"
+// slider (params.glow) actual neighbor-bleeding blur.
+//
+// Rendered as a SEPARATE pass from the main renderTarget above rather than
+// bolted onto it, on purpose: UnrealBloomPass's internal composite doesn't
+// reliably preserve the original alpha channel (it's built for opaque game
+// scenes, not for carrying an "is there real content here" mask through). If
+// we bloomed renderTarget directly, the alpha-based content-mask that fixed
+// the background-noise bug (see uSourceIsMasked in main.frag.glsl) would
+// break again — background pixels touched by bloom's blur would read as
+// non-zero alpha and get treated as real content.
+//
+// So: renderTarget stays exactly as before (correct, un-bloomed alpha for
+// masking); bloomComposer renders the SAME scene into its own target, and
+// only its RGB is sampled (via uBloomTex) and additively mixed into srcColor
+// in the shader, BEFORE luminance/glyph mapping — so the glow genuinely
+// lightens neighboring cells' density instead of just recoloring cells that
+// were already going to be dense/sparse anyway.
+//
+// `renderer` (THREE.WebGLRenderer) is already declared above this point —
+// see the top of this file.
+const bloomComposer = new EffectComposer(renderer);
+bloomComposer.renderToScreen = false;
+bloomComposer.addPass(new RenderPass(sourceScene, sourceCamera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(1024, 1024),
+  0,    // strength — driven live from params.glow in tick(), see below
+  0.4,  // radius
+  0.85  // luminance threshold — only genuinely bright/emissive pixels (like the star) bloom, not the mid-gray hand
+);
+bloomComposer.addPass(bloomPass);
+// 1x1 black fallback so uBloomTex contributes nothing for video/image
+// sources (no 3D scene to bloom there — see tick()'s branch below).
+const blackBloomTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+blackBloomTex.needsUpdate = true;
 
 // ---------------------------------------------------------------------------
 // Cursor trail — a decaying accumulation buffer, ping-ponged between two
@@ -790,6 +837,8 @@ async function boot() {
 
   const uniforms = {
     uSource: { value: renderTarget.texture },
+    uBloomTex: { value: blackBloomTex }, // real bloom RGB, additively mixed into srcColor — see Bloom section up top; black (no-op) until the first 3D-source frame renders it for real
+
     uResolution: { value: new THREE.Vector2(canvas.clientWidth, canvas.clientHeight) },
     uMode: { value: MODES[params.mode] },
     uCellSize: { value: params.cellSize },
@@ -1066,6 +1115,7 @@ async function boot() {
     const rtSize = Math.min(2048, Math.max(256, Math.floor(Math.max(w, h) * renderer.getPixelRatio())));
     if (renderTarget.width !== rtSize) {
       renderTarget.setSize(rtSize, rtSize);
+      bloomComposer.setSize(rtSize, rtSize);
     }
 
     // trail buffers: match the CANVAS's aspect ratio (not square, unlike the
@@ -1154,7 +1204,22 @@ async function boot() {
       renderer.render(sourceScene, sourceCamera);
       renderer.setRenderTarget(null);
       uniforms.uSource.value = renderTarget.texture;
+
+      // Second render of the SAME scene through the bloom composer (see
+      // "Bloom" section near the top of this file for why this is a
+      // separate pass instead of bolting bloom onto renderTarget directly —
+      // short version: preserves renderTarget's alpha content-mask). Skipped
+      // entirely at glow=0 to save the extra render+blur passes when it's
+      // not in use.
+      if (params.glow > 0) {
+        bloomPass.strength = params.glow * 2.5;
+        bloomComposer.render();
+        uniforms.uBloomTex.value = bloomComposer.readBuffer.texture;
+      } else {
+        uniforms.uBloomTex.value = blackBloomTex;
+      }
     } else if (currentSourceType === "video" && videoEl) {
+      uniforms.uBloomTex.value = blackBloomTex; // no 3D scene to bloom for video/image sources
       if (!uniforms.uSource.value.isVideoTexture) {
         uniforms.uSource.value = new THREE.VideoTexture(videoEl);
       }
@@ -1162,6 +1227,7 @@ async function boot() {
       // above for why this doesn't fight the user dragging the slider.
       params.videoTime = videoEl.currentTime;
     } else if (currentSourceType === "image" && imageTexture) {
+      uniforms.uBloomTex.value = blackBloomTex; // no 3D scene to bloom for video/image sources
       uniforms.uSource.value = imageTexture;
     }
 

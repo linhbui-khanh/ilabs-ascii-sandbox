@@ -21,6 +21,15 @@ precision highp float;
 varying vec2 vUv;
 
 uniform sampler2D uSource;      // the unified source texture (video/image/3D RT)
+// Real bloom RGB for 3D sources (see main.js's "Bloom" section for why this
+// is a SEPARATE texture from uSource rather than baked into it: preserves
+// uSource's alpha content-mask, which UnrealBloomPass's own composite
+// doesn't reliably carry through). Black (all-zero, a no-op add) for
+// video/image sources and whenever the Glow slider is at 0. Sampled and
+// added to srcColor further down, BEFORE luminance/glyph mapping, so glow
+// actually lightens/spreads into neighboring cells' density instead of just
+// recoloring cells that were already going to be dense/sparse regardless.
+uniform sampler2D uBloomTex;
 uniform vec2  uResolution;      // canvas size in physical pixels
 
 uniform int   uMode;
@@ -220,6 +229,12 @@ void main() {
   float canvasAspect = uResolution.x / uResolution.y;
   vec2 sampleUv = coverUv(cellCenterUv, canvasAspect, uSourceAspect);
   vec3 srcColor = sampleSourceBlurred(sampleUv, uBlurAmount);
+  // Real bloom light-bleed (3D sources only, see uBloomTex comment above) —
+  // added BEFORE brightness/contrast so those filters still apply uniformly
+  // to the combined result, and before luminance/glyph mapping so a bright
+  // glowing point genuinely lightens/spreads into neighboring cells instead
+  // of only recoloring cells that were already going to read as dense/sparse.
+  srcColor += texture2D(uBloomTex, sampleUv).rgb;
 
   // brightness/contrast, applied before the luminance/coverage math so they
   // actually affect glyph density and dot size, not just the final tint.
