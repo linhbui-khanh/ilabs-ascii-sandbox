@@ -250,11 +250,58 @@ as the rest of this sandbox, and exposes `initMagnetism(selector, options)` →
 add elements with a `.magnetic` class and call `initMagnetism(".magnetic")`
 from `main.js` — see the comment near the bottom of `index.html`.
 
-**Removed:** Cursor parallax tilt and Source magnetism (both in the 3D
-Transform folder) were pulled out — in practice they didn't read well (the
-tilt/pull felt more like jitter than an intentional reaction to the cursor).
-If you want cursor-reactive 3D motion again later, it's worth designing from
-scratch rather than re-adding these two.
+**Removed, then redesigned (2026-07-28):** Cursor parallax tilt and Source
+magnetism (both in the old 3D Transform folder) were originally pulled out
+for feeling like jitter rather than an intentional reaction to the cursor —
+see git history for that first attempt. Re-explored after seeing efecto.app's
+"Interactivity" panel (Position/Rotation/Light + Momentum/Spring physics +
+Mouse axes) — the actual fix wasn't "add it back," it was replacing the old
+raw per-frame lerp with a real spring-damper, which is what was missing the
+first time. See "3D Object interactivity" below for the current version.
+
+## 3D Object interactivity (Mouse interaction → 3D Object tab)
+
+Mouse-driven Position/Rotation/Light on the 3D source (spark/`.glb` only —
+video/image sources aren't affected). One shared mass-spring-damper
+(`interactSpringPos`/`interactSpringVel` in `main.js`) simulates a single
+reactive 2D point — the mouse's offset from canvas center, -1..1 per axis —
+and Position/Rotation/Light are just per-channel strength multipliers reading
+off that *same* spring point, matching how efecto's panel has one Momentum/
+Spring pair shared across all three channels rather than three separate
+physics systems:
+
+- **Position** — world-space offset added on top of the manual Position X/Y
+  sliders (additive, not replacing — capped at 0.5 world units at
+  strength=100).
+- **Rotation** — tilt added on top of the manual Rotation X/Y sliders (and
+  auto-rotate, if on) — mouse Y drives tilt around X, mouse X drives tilt
+  around Y, capped at 25° at strength=100.
+- **Light** — shifts the scene's key `DirectionalLight` position around its
+  fixed rest pose (`KEY_LIGHT_REST`, the light's original (2,3,4)); doesn't
+  touch the ambient light.
+- **Momentum** — maps to the spring's *damping ratio*, inverted: higher
+  Momentum = lower damping = more overshoot/bounce before it settles. At 0 the
+  spring is overdamped (heavy, no bounce); near 100 it's underdamped (bouncy,
+  can overshoot past the target before settling).
+- **Spring** — maps to the spring's *stiffness*: higher = snappier/faster
+  response to the cursor, lower = more lag before it starts moving.
+- **Mouse axes** (`X only` / `Y only` / `Both`) — gates which axis of the
+  shared spring's target actually moves; the other axis's target is forced to
+  0, so the spring settles that axis back to center regardless of where the
+  cursor is.
+
+Moving the cursor off the canvas (`pointerleave`) resets the raw pointer
+target back to center (0.5, 0.5) rather than freezing at its last position —
+without this the spring would just hold whatever offset the cursor last had,
+never settling back to rest. Physics are re-tuned live every frame from
+`params.interactMomentum`/`interactSpring`, so dragging either slider
+mid-interaction changes the feel immediately, no restart needed.
+
+**Why one shared spring instead of three independent ones:** simpler to
+reason about and tune (one Momentum/Spring pair to feel out instead of
+three), and it's what the reference panel does — Position/Rotation/Light in
+efecto read as "taps" on one physical reaction, not three unrelated
+reactions that happen to share a name.
 
 ## Color mode + filters
 
@@ -673,8 +720,15 @@ actually spend most of a tuning session):
   threshold
 - **Filters** — brightness/contrast/blur/glow (see "Color mode + filters"
   above)
-- **Mouse interaction** — radius/strength/smoothing/trail/magnet (see
-  "Cursor smoothing", "Cursor trail", and "Magnet dots/glyphs" above)
+- **Mouse interaction** — same tab-bar pattern as Effect/Mode (generalized
+  into reusable `.gui-tabbar`/`.gui-tab` CSS, see "GUI reskin" below), split
+  into two tabs: **Dots / Glyphs** (radius/strength/smoothing/trail/magnet —
+  see "Cursor smoothing", "Cursor trail", and "Magnet dots/glyphs" above) and
+  **3D Object** (Position/Rotation/Light/Momentum/Spring/Mouse axes — see "3D
+  Object interactivity" above). Built on real lil-gui sub-folders
+  (`dotsFolder`/`interactFolder`), toggled via their own `.show()`/`.hide()`
+  rather than per-controller-row visibility, since a whole folder's worth of
+  controls moves together
 - **Export settings** — WebP snapshot format + "Also capture GIF" toggle
   only; the PNG capture/record triggers themselves live at the panel root
   above, not here (see "Export" above)
@@ -744,7 +798,7 @@ plus a secondary dropdown that only appears under the Dither tab, listing its
 Implementation, `js/main.js`'s `buildModeTabBar()`: the real `mode` lil-gui
 controller is NOT replaced — it's kept fully alive (still driving
 `uniforms.uMode`, still in `controllerMap` for presets/undo-redo) and just
-visually hidden (`.mode-row-hidden`). The tab bar and dither `<select>` are
+visually hidden (`.gui-row-hidden`). The tab bar and dither `<select>` are
 plain DOM elements inserted right after its row; clicking a tab or picking an
 algorithm calls `modeController.setValue(...)`, which is the same "change the
 mode" code path as the old dropdown — so no logic duplication. `syncModeUI()`
@@ -758,13 +812,29 @@ explicitly call `pushHistory()` rather than assuming `setValue()` bubbles into
 `guiLook.onFinishChange()` (untested assumption otherwise, and undo-history
 gaps are cheap to prevent but annoying to debug after the fact).
 
+The `.gui-tabbar`/`.gui-tab`/`.gui-row-hidden` CSS classes (originally named
+`.mode-*`) were generalized the same day this shipped, once "Mouse
+interaction" needed the identical tab-bar treatment — see
+`buildMouseInteractionTabBar()` and "3D Object interactivity" above. That
+second use case is simpler: it toggles two whole lil-gui sub-folders via
+their own `.show()`/`.hide()` instead of individual controller rows, since a
+folder's contents always move as a unit.
+
+**3. Scrollbar removal.** `#gui-left`/`#gui-right` keep `overflow-y: auto`
+(so the panels still scroll when taller than a shrunk browser window) but
+hide the scrollbar's own track/thumb chrome (`scrollbar-width: none` +
+`::-webkit-scrollbar { display: none }`) — a visible OS scrollbar riding the
+panel edge read as an unfinished/default-browser element next to the rest of
+this reskin.
+
 **Not yet browser-verified.** Chrome automation runs against the user's real
 browser, which can't reach this sandbox's local filesystem — testing this
 needs either a push + Vercel redeploy, or `npx serve .` run directly on your
 own machine (not from this environment). Reviewed via `node --check`, a CSS
 brace-balance check, and re-tracing every DOM selector (`.controller`,
-`.controller.boolean`, `modeController.domElement`) against the live DOM
-dump captured earlier in this session — but please eyeball it once deployed.
+`.controller.boolean`, `modeController.domElement`, `dotsFolder`/
+`interactFolder`'s `.children`) against the live DOM dump captured earlier in
+this session — but please eyeball it once deployed.
 
 ## Re-baking the MSDF atlas (`tools/msdf-bake/`)
 

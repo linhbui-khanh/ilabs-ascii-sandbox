@@ -372,6 +372,8 @@ const PRESET_KEYS = [
   "previewFrame",
   "mouseRadius", "mouseStrength", "mouseSmoothing", "trailEnabled", "trailDecay",
   "trailStrength", "magnetEnabled", "magnetRadius", "magnetStrength",
+  "interactPosition", "interactRotation", "interactLight", "interactMomentum",
+  "interactSpring", "interactAxes",
   "autoRotate", "scale", "posX", "posY", "rotX", "rotY", "rotZ",
   "imageScale", "imageOffsetX", "imageOffsetY",
   "videoLoop", "includeGIF",
@@ -633,6 +635,20 @@ const params = {
   magnetEnabled: false,
   magnetRadius: 0.12,
   magnetStrength: 0.7,
+  // "3D Object" interactivity — mouse-driven Position/Rotation/Light on the
+  // 3D source itself (spark/glb only — see tick()'s spring integrator below).
+  // A previous, simpler version of this (raw-lerp cursor parallax + source
+  // magnetism) was tried and pulled out for feeling like jitter rather than
+  // an intentional reaction — see README "Removed". This version replaces
+  // the lerp with a real mass-spring-damper per mouse axis, and Momentum/
+  // Spring below tune that spring's damping ratio/stiffness independently —
+  // that's the actual fix, not just a re-add of the old approach.
+  interactPosition: 8, // 0..100, world-space position offset strength
+  interactRotation: 6, // 0..100, tilt strength
+  interactLight: 20, // 0..100, key-light position shift strength
+  interactMomentum: 40, // 0..100 — LOWER damping ratio (more overshoot/bounce) as this goes up
+  interactSpring: 60, // 0..100 — HIGHER stiffness (snappier response) as this goes up
+  interactAxes: "Both", // "X only" | "Y only" | "Both" — which mouse axis feeds the spring
   autoRotate: true,
   scale: 0.7, // multiplies sourceBaseScale — default <1 so the spark reads smaller/tighter in frame
   posX: 0,
@@ -876,6 +892,27 @@ canvas.addEventListener("pointermove", (e) => {
   mouseUv.x = (e.clientX - rect.left) / rect.width;
   mouseUv.y = 1.0 - (e.clientY - rect.top) / rect.height; // flip to match vUv (bottom-left origin)
 });
+// cursor leaving the canvas relaxes the reactive point back to center (0.5,
+// 0.5) instead of freezing at its last position — without this, "3D Object"
+// interactivity (see below) would leave the source stuck offset toward
+// wherever the mouse last was, rather than settling back to rest.
+canvas.addEventListener("pointerleave", () => {
+  mouseUv.set(0.5, 0.5);
+});
+
+// ---------------------------------------------------------------------------
+// "3D Object" interactivity — mouse-driven Position/Rotation/Light on the 3D
+// source (spark/glb only), see the "Mouse interaction" -> "3D Object" GUI tab
+// and tick() below for where these get read/applied. One shared mass-spring-
+// damper simulates a single reactive 2D point (mouse offset from center,
+// -1..1 per axis); Position/Rotation/Light are just per-channel strength
+// multipliers read off that SAME spring point, matching how efecto's
+// Interactivity panel has one Momentum/Spring pair shared across all 3
+// channels rather than three independent physics systems.
+// ---------------------------------------------------------------------------
+const interactSpringPos = new THREE.Vector2(0, 0); // current spring value, -1..1 per axis
+const interactSpringVel = new THREE.Vector2(0, 0);
+const KEY_LIGHT_REST = new THREE.Vector3(2, 3, 4); // key.position's original fixed value, now the "rest" pose interactLight offsets away from
 
 // ---------------------------------------------------------------------------
 // Boot: load the MSDF atlas, build the blue-noise texture, wire the display
@@ -1129,16 +1166,16 @@ async function boot() {
   let syncModeUI = () => {}; // replaced once buildModeTabBar() runs; see modeController.onChange above
   function buildModeTabBar() {
     const modeRow = modeController.domElement.closest(".controller");
-    modeRow.classList.add("mode-row-hidden"); // controller stays alive/functional, just visually replaced
+    modeRow.classList.add("gui-row-hidden"); // controller stays alive/functional, just visually replaced
 
     const tabBar = document.createElement("div");
-    tabBar.className = "mode-tabbar";
+    tabBar.className = "gui-tabbar";
     const families = ["ASCII", "Dither", "Smooth Dot"];
     const tabButtons = {};
     families.forEach((family) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "mode-tab";
+      btn.className = "gui-tab";
       btn.textContent = family;
       btn.addEventListener("click", () => {
         const nextMode = MODE_FAMILIES[params.mode] === family ? params.mode : FAMILY_DEFAULT_MODE[family];
@@ -1172,8 +1209,8 @@ async function boot() {
       if (family === "Dither") ditherSelect.value = params.mode;
       const ditherScaleRow = ditherScaleController.domElement.closest(".controller");
       const dotLevelsRow = dotLevelsController.domElement.closest(".controller");
-      ditherScaleRow.classList.toggle("mode-row-hidden", params.mode !== "Blue Noise");
-      dotLevelsRow.classList.toggle("mode-row-hidden", params.mode !== "Smooth Dot");
+      ditherScaleRow.classList.toggle("gui-row-hidden", params.mode !== "Blue Noise");
+      dotLevelsRow.classList.toggle("gui-row-hidden", params.mode !== "Smooth Dot");
     };
     syncModeUI();
   }
@@ -1206,37 +1243,99 @@ async function boot() {
     uniforms.uGlowStrength.value = v;
   });
 
+  // Split into two tabs (same tab-bar pattern as "Effect" -> Mode above,
+  // generalized into reusable .gui-tabbar/.gui-tab CSS classes) instead of
+  // one long stacked list — this folder had grown to 9 controls spanning two
+  // very different concerns (2D dot/glyph reaction vs. the whole 3D object's
+  // pose), which read as "one big pile" rather than two clear choices.
   const mouseFolder = guiLook.addFolder("Mouse interaction");
-  mouseFolder.add(params, "mouseRadius", 0.02, 0.6, 0.01).name("Radius").onChange((v) => {
+
+  const dotsFolder = mouseFolder.addFolder("Dots / Glyphs");
+  dotsFolder.domElement.classList.add("gui-tab-folder");
+  dotsFolder.add(params, "mouseRadius", 0.02, 0.6, 0.01).name("Radius").onChange((v) => {
     uniforms.uMouseRadius.value = v;
     trailMaterial.uniforms.uMouseRadius.value = v; // trail stamp uses the same radius, for a consistent circle size
   });
-  mouseFolder.add(params, "mouseStrength", 0, 1, 0.01).name("Strength").onChange((v) => {
+  dotsFolder.add(params, "mouseStrength", 0, 1, 0.01).name("Strength").onChange((v) => {
     uniforms.uMouseStrength.value = v;
   });
-  mouseFolder.add(params, "mouseSmoothing", 0.02, 1, 0.01).name("Cursor smoothing").onChange((v) => {
+  dotsFolder.add(params, "mouseSmoothing", 0.02, 1, 0.01).name("Cursor smoothing").onChange((v) => {
     // no uniform to update — read directly from params in tick()'s lerp
   });
-  mouseFolder.add(params, "trailEnabled").name("Enable trail");
-  mouseFolder.add(params, "trailDecay", 0.5, 0.99, 0.001).name("Trail decay").onChange((v) => {
+  dotsFolder.add(params, "trailEnabled").name("Enable trail");
+  dotsFolder.add(params, "trailDecay", 0.5, 0.99, 0.001).name("Trail decay").onChange((v) => {
     trailMaterial.uniforms.uDecay.value = v;
   });
-  mouseFolder.add(params, "trailStrength", 0, 1, 0.01).name("Trail strength").onChange((v) => {
+  dotsFolder.add(params, "trailStrength", 0, 1, 0.01).name("Trail strength").onChange((v) => {
     trailMaterial.uniforms.uStampStrength.value = v;
   });
   // "Magnet" — dots/glyphs visually shift toward the cursor within a radius,
   // independent of Radius/Strength above (those only recolor/tint; this is a
   // positional pull). Capped within each cell — see shader comment + README
   // "Magnet dots/glyphs" for that trade-off.
-  mouseFolder.add(params, "magnetEnabled").name("Magnetize dots/glyphs").onChange((v) => {
+  dotsFolder.add(params, "magnetEnabled").name("Magnetize dots/glyphs").onChange((v) => {
     uniforms.uMagnetEnabled.value = v ? 1 : 0;
   });
-  mouseFolder.add(params, "magnetRadius", 0.02, 0.6, 0.01).name("Magnet radius").onChange((v) => {
+  dotsFolder.add(params, "magnetRadius", 0.02, 0.6, 0.01).name("Magnet radius").onChange((v) => {
     uniforms.uMagnetRadius.value = v;
   });
-  mouseFolder.add(params, "magnetStrength", 0, 1, 0.01).name("Magnet strength").onChange((v) => {
+  dotsFolder.add(params, "magnetStrength", 0, 1, 0.01).name("Magnet strength").onChange((v) => {
     uniforms.uMagnetStrength.value = v;
   });
+
+  // "3D Object" — mouse-driven Position/Rotation/Light on the 3D source
+  // itself (spark/glb only), matching efecto's Interactivity panel. Actual
+  // physics live in tick() (see interactSpringPos/Vel above); these
+  // controllers are pure params — no uniforms/materials to push into,
+  // tick() reads params.interact* directly every frame.
+  const interactFolder = mouseFolder.addFolder("3D Object");
+  interactFolder.domElement.classList.add("gui-tab-folder");
+  interactFolder.add(params, "interactPosition", 0, 100, 1).name("Position");
+  interactFolder.add(params, "interactRotation", 0, 100, 1).name("Rotation");
+  interactFolder.add(params, "interactLight", 0, 100, 1).name("Light");
+  interactFolder.add(params, "interactMomentum", 0, 100, 1).name("Momentum");
+  interactFolder.add(params, "interactSpring", 0, 100, 1).name("Spring");
+  interactFolder.add(params, "interactAxes", ["X only", "Y only", "Both"]).name("Mouse axes");
+
+  // tab bar switching between the two sub-folders above — see
+  // buildModeTabBar() for the original version of this pattern; this one is
+  // simpler since lil-gui folders already have real .show()/.hide(), so
+  // there's no per-controller-row visibility bookkeeping needed here.
+  function buildMouseInteractionTabBar() {
+    const tabBar = document.createElement("div");
+    tabBar.className = "gui-tabbar";
+    const tabs = [
+      { label: "Dots / Glyphs", folder: dotsFolder },
+      { label: "3D Object", folder: interactFolder },
+    ];
+    let activeLabel = tabs[0].label;
+    const buttons = {};
+    tabs.forEach(({ label }) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "gui-tab";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        activeLabel = label;
+        sync();
+      });
+      buttons[label] = btn;
+      tabBar.appendChild(btn);
+    });
+    function sync() {
+      tabs.forEach(({ label, folder }) => {
+        buttons[label].classList.toggle("active", label === activeLabel);
+        if (label === activeLabel) folder.show();
+        else folder.hide();
+      });
+    }
+    // insert as the first child of mouseFolder's own .children, above both
+    // sub-folders (which were already appended by addFolder() above).
+    const mouseChildren = mouseFolder.domElement.querySelector(":scope > .children");
+    mouseChildren.insertBefore(tabBar, mouseChildren.firstChild);
+    sync();
+  }
+  buildMouseInteractionTabBar();
 
   // secondary export settings only — the actual Capture/Record trigger
   // buttons are promoted to the root of this panel (see top of this
@@ -1381,16 +1480,54 @@ async function boot() {
     uniforms.uSourceIsMasked.value = (currentSourceType === "spark" || currentSourceType === "glb") ? 1 : 0;
 
     if (currentSourceType === "spark" || currentSourceType === "glb") {
+      // "3D Object" interactivity spring — one shared reactive point (see
+      // declaration comment above) that Position/Rotation/Light strengths
+      // all read from. Stepped here (not gated behind sourceObject truthiness
+      // below) so the spring keeps easing back to rest even on a frame where
+      // sourceObject is momentarily null (e.g. mid-GLB-swap).
+      {
+        let targetX = (mouseUv.x - 0.5) * 2; // -1..1
+        let targetY = (mouseUv.y - 0.5) * 2;
+        if (params.interactAxes === "X only") targetY = 0;
+        if (params.interactAxes === "Y only") targetX = 0;
+
+        // Spring -> stiffness (snappiness), Momentum -> damping ratio
+        // (LOWER damping = more overshoot/bounce before settling). Both read
+        // every frame so dragging either slider live re-tunes the feel
+        // instantly instead of needing a restart.
+        const stiffness = THREE.MathUtils.lerp(20, 400, params.interactSpring / 100);
+        const critDamping = 2 * Math.sqrt(stiffness); // mass = 1
+        const dampingRatio = THREE.MathUtils.lerp(1.4, 0.25, params.interactMomentum / 100);
+        const damping = dampingRatio * critDamping;
+        const stepDt = Math.min(dt, 1 / 30); // clamp so a tabbed-away/stalled frame can't fling the spring
+
+        const forceX = (targetX - interactSpringPos.x) * stiffness - interactSpringVel.x * damping;
+        interactSpringVel.x += forceX * stepDt;
+        interactSpringPos.x += interactSpringVel.x * stepDt;
+
+        const forceY = (targetY - interactSpringPos.y) * stiffness - interactSpringVel.y * damping;
+        interactSpringVel.y += forceY * stepDt;
+        interactSpringPos.y += interactSpringVel.y * stepDt;
+      }
+
       if (sourceObject) {
         const rotXBase = THREE.MathUtils.degToRad(params.rotX);
         const rotYBase = THREE.MathUtils.degToRad(params.rotY);
         const rotZBase = THREE.MathUtils.degToRad(params.rotZ);
+        // mouse-driven tilt on top of the manual pose — Y-axis mouse motion
+        // tilts around X (nod toward/away from cursor), X-axis mouse motion
+        // tilts around Y (turn toward cursor), same convention as most
+        // mouse-parallax implementations. Max ~25° at strength=100.
+        const rotStrength = params.interactRotation / 100;
+        const tiltMaxRad = THREE.MathUtils.degToRad(25);
+        const tiltX = interactSpringPos.y * rotStrength * tiltMaxRad;
+        const tiltY = -interactSpringPos.x * rotStrength * tiltMaxRad;
         // manual sliders set the base pose; auto-rotate (when on) ADDS motion
         // on top instead of overriding the sliders, so you can dial in an
         // angle and still see it move.
         sourceObject.rotation.set(
-          rotXBase + (params.autoRotate ? Math.sin(t * 0.3) * 0.2 : 0),
-          rotYBase + (params.autoRotate ? t * 0.4 : 0),
+          rotXBase + (params.autoRotate ? Math.sin(t * 0.3) * 0.2 : 0) + tiltX,
+          rotYBase + (params.autoRotate ? t * 0.4 : 0) + tiltY,
           rotZBase
         );
 
@@ -1403,9 +1540,26 @@ async function boot() {
         // sourceCenterOffset's declaration comment for why this can't just
         // be set once in setSourceGLB() the way an earlier version tried.
         const effectiveScale = sourceBaseScale * params.scale;
-        sourceObject.position.x = params.posX - sourceCenterOffset.x * effectiveScale;
-        sourceObject.position.y = params.posY - sourceCenterOffset.y * effectiveScale;
+        const posStrength = params.interactPosition / 100;
+        // world-unit offset — 0.5 at strength=100 is a deliberately modest
+        // cap (this sits ON TOP of the manual Position X/Y sliders, additive
+        // not replacing — see the "Removed" README note on why the old
+        // version's unclamped pull read as jitter rather than reaction).
+        sourceObject.position.x = params.posX - sourceCenterOffset.x * effectiveScale + interactSpringPos.x * posStrength * 0.5;
+        sourceObject.position.y = params.posY - sourceCenterOffset.y * effectiveScale + interactSpringPos.y * posStrength * 0.5;
         sourceObject.scale.setScalar(effectiveScale);
+      }
+
+      // mouse-driven key-light position shift — same shared spring point,
+      // own strength tap. Offset is in world units around the light's fixed
+      // rest position (see KEY_LIGHT_REST); doesn't touch ambient light.
+      {
+        const lightStrength = params.interactLight / 100;
+        key.position.set(
+          KEY_LIGHT_REST.x + interactSpringPos.x * lightStrength * 4,
+          KEY_LIGHT_REST.y + interactSpringPos.y * lightStrength * 4,
+          KEY_LIGHT_REST.z
+        );
       }
       renderer.setRenderTarget(renderTarget);
       renderer.render(sourceScene, sourceCamera);

@@ -136,12 +136,12 @@
       box-shadow: 0 0 0 2px rgba(255, 69, 26, 0.35);
     }
 
-    /* Mode tab bar + Dither sub-select — DOM built/inserted by
-       buildModeTabBar() in js/main.js, right where the native "Mode"
-       dropdown used to sit (that controller/row still exists underneath,
-       just hidden via .mode-row-hidden — see JS comment for why). */
-    .mode-row-hidden { display: none !important; }
-    .mode-tabbar {
+    /* Generic tab bar — originally built just for "Effect" -> Mode
+       (buildModeTabBar() in js/main.js), now reused as-is for "Mouse
+       interaction" -> Dots/Glyphs vs 3D Object (buildMouseInteractionTabBar())
+       since both are the same "replace a flat list with tabs" pattern. */
+    .gui-row-hidden { display: none !important; }
+    .gui-tabbar {
       display: flex;
       gap: 4px;
       margin: 6px 8px 4px;
@@ -149,7 +149,7 @@
       background: var(--title-background-color);
       border-radius: 8px;
     }
-    .mode-tab {
+    .gui-tab {
       flex: 1;
       border: none;
       background: transparent;
@@ -162,12 +162,17 @@
       cursor: pointer;
       transition: background 0.15s ease, color 0.15s ease;
     }
-    .mode-tab:hover { color: rgba(236, 236, 232, 0.85); }
-    .mode-tab.active {
+    .gui-tab:hover { color: rgba(236, 236, 232, 0.85); }
+    .gui-tab.active {
       background: var(--accent);
       color: #141413;
       font-weight: 600;
     }
+    /* a lil-gui sub-folder used purely as a tab's content pane (its own
+       title bar is redundant with the custom tab label above it, and its
+       show()/hide() is driven by the tab bar instead of the usual
+       click-to-collapse triangle). */
+    .gui-tab-folder > .title { display: none; }
     .mode-dither-select {
       display: none; /* toggled via JS depending on active tab */
       width: calc(100% - 16px);
@@ -192,6 +197,15 @@
       max-height: 100vh;
       overflow-y: auto;
       z-index: 20;
+      /* keeps scrolling when the panel is taller than a shrunk browser
+         window, but hides the scrollbar's own track/thumb chrome — a
+         visible scrollbar riding the edge of the panel read as an
+         unfinished/OS-level UI element next to the rest of the reskin. */
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* legacy Edge */
+    }
+    #gui-left::-webkit-scrollbar, #gui-right::-webkit-scrollbar {
+      display: none; /* Chrome / Safari / current Edge */
     }
     #gui-left { left: 0; }
     #gui-right { right: 0; }
