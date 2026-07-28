@@ -346,6 +346,7 @@ const PRESET_KEYS = [
   "mouseRadius", "mouseStrength", "mouseSmoothing", "trailEnabled", "trailDecay",
   "trailStrength", "magnetEnabled", "magnetRadius", "magnetStrength",
   "autoRotate", "scale", "posX", "posY", "rotX", "rotY", "rotZ",
+  "imageScale", "imageOffsetX", "imageOffsetY",
   "videoLoop", "includeGIF",
 ];
 
@@ -612,6 +613,13 @@ const params = {
   rotX: 0, // degrees
   rotY: 0, // degrees
   rotZ: 0, // degrees
+  // "Image/Video Framing" — 2D-source equivalent of the 3D Transform block
+  // above (image/video sources have no Object3D to move, so this is a UV
+  // zoom/pan instead — see uImageScale/uImageOffset in main.frag.glsl).
+  // 1.0/(0,0) is the identity transform: unchanged from before this existed.
+  imageScale: 1.0,
+  imageOffsetX: 0,
+  imageOffsetY: 0,
   videoLoop: true,
   videoTime: 0, // seconds — kept in sync FROM videoEl.currentTime in tick() via lil-gui's .listen()
   togglePlayPause: () => toggleVideoPlayPause(),
@@ -892,6 +900,8 @@ async function boot() {
     uDitherScale: { value: params.ditherScale },
     uDotLevels: { value: params.dotLevels },
     uSourceAspect: { value: currentSourceAspect },
+    uImageScale: { value: params.imageScale },
+    uImageOffset: { value: new THREE.Vector2(params.imageOffsetX, params.imageOffsetY) },
     // 1.0 for the 3D-rendered sources (spark/glb) — real alpha coverage from
     // the transparently-cleared render target; 0.0 for video/image, where
     // the whole frame is content and there's no "empty background" to mask.
@@ -1032,6 +1042,23 @@ async function boot() {
   transformFolder.add(params, "rotX", -180, 180, 1).name("Rotation X°");
   transformFolder.add(params, "rotY", -180, 180, 1).name("Rotation Y°");
   transformFolder.add(params, "rotZ", -180, 180, 1).name("Rotation Z°");
+
+  // 2D-source equivalent of the folder above — image/video sources have no
+  // Object3D to move, so this is a UV zoom/pan (see uImageScale/uImageOffset
+  // in main.frag.glsl) rather than a real transform. Added because coverUv()
+  // always crops-to-fill with no way to zoom out and see background around
+  // an uploaded image/video — 1.0/(0,0) matches that old always-fill
+  // behavior exactly, sliders are purely additive on top.
+  const framingFolder = guiSession.addFolder("Image/Video Framing");
+  framingFolder.add(params, "imageScale", 0.2, 3, 0.01).name("Scale").onChange((v) => {
+    uniforms.uImageScale.value = v;
+  });
+  framingFolder.add(params, "imageOffsetX", -1, 1, 0.01).name("Position X").onChange((v) => {
+    uniforms.uImageOffset.value.x = v;
+  });
+  framingFolder.add(params, "imageOffsetY", -1, 1, 0.01).name("Position Y").onChange((v) => {
+    uniforms.uImageOffset.value.y = v;
+  });
 
   const modeFolder = guiLook.addFolder("Effect");
   modeFolder.add(params, "mode", Object.keys(MODES)).name("Mode").onChange((v) => {

@@ -648,6 +648,15 @@ workflow — set up once per pass, or touched occasionally to branch/compare):
 - **3D Transform** — scale, position X/Y, rotation X/Y/Z (cursor parallax
   tilt and source magnetism were removed — see "Magnet dots/glyphs" section
   above)
+- **Image/Video Framing** — scale + position X/Y for image/video sources
+  (added 2026-07-28: `coverUv()` always crops an uploaded image/video to
+  fill the frame with no way to zoom out, so this adds a UV zoom/pan on top
+  — 1.0/(0,0) matches the old always-fill behavior exactly. Scale below 1.0
+  reveals real background around the source (via `uImageOffset`/
+  `inFrameBounds` gating `contentMask` in `main.frag.glsl`), not a
+  clamped/stretched texture edge. This is the 2D-source equivalent of "3D
+  Transform" above — image/video sources have no Object3D to move, so it's
+  a plain UV transform instead of a real scene-graph transform)
 
 **Right — "Look & Output"** (how it renders, and getting it out — where you
 actually spend most of a tuning session):

@@ -73,6 +73,18 @@ uniform float uDotLevels;       // "Smooth Dot" mode (uMode==7) — number of di
 // 1.0 for the 3D-rendered sources (their render target is always square).
 uniform float uSourceAspect;
 
+// "Image/Video Framing" (Source folder) — zoom/pan on TOP of coverUv()'s
+// crop-to-fill, for image/video sources specifically (3D sources already
+// have their own dedicated Scale/Position in the "3D Transform" folder, via
+// actually moving the Object3D — this is the 2D-source equivalent, done as a
+// plain UV transform since there's no Object3D for a flat image/video to
+// move). Defaults (1.0, (0,0)) are the identity transform, so this changes
+// nothing unless the sliders are touched. See main() for how <1.0 (zoom out)
+// reveals real background around the source instead of a clamped/stretched
+// texture edge.
+uniform float uImageScale;
+uniform vec2  uImageOffset;
+
 // Explicit "is there actually something rendered here" mask, read from
 // uSource's ALPHA channel — 1.0 where the 3D scene actually drew a mesh
 // pixel, 0.0 in the empty space around it (the render target is cleared
@@ -232,6 +244,17 @@ void main() {
   // fills the frame (crop, not squash) instead of stretching to the canvas.
   float canvasAspect = uResolution.x / uResolution.y;
   vec2 sampleUv = coverUv(cellCenterUv, canvasAspect, uSourceAspect);
+
+  // "Image/Video Framing" zoom/pan (see uImageScale/uImageOffset comment
+  // above) — applied AFTER coverUv, so the baseline "crop to fill, no
+  // stretching" behavior is unchanged; this is an additional zoom centered
+  // on the source's own middle, plus a pan offset. Scale < 1.0 pushes
+  // sampleUv outside [0,1] in the margins — inFrameBounds below turns THAT
+  // into real background instead of a clamped/repeated edge-pixel smear,
+  // which is what a naive UV-only zoom-out would otherwise look like.
+  sampleUv = (sampleUv - 0.5) / max(uImageScale, 0.05) - uImageOffset + 0.5;
+  float inFrameBounds = (sampleUv.x >= 0.0 && sampleUv.x <= 1.0 && sampleUv.y >= 0.0 && sampleUv.y <= 1.0) ? 1.0 : 0.0;
+
   vec3 srcColor = sampleSourceBlurred(sampleUv, uBlurAmount);
   // Real bloom light-bleed (3D sources only, see uBloomTex comment above) —
   // added BEFORE brightness/contrast so those filters still apply uniformly
@@ -254,7 +277,11 @@ void main() {
   // is forced to 1.0 (mix toward 1.0 when uSourceIsMasked is 0) so nothing
   // changes for those sources; for the 3D-rendered sources it's the actual
   // "did a mesh pixel land here" coverage.
-  float contentMask = mix(1.0, texture2D(uSource, sampleUv).a, uSourceIsMasked);
+  // ANDed with inFrameBounds regardless of source type: at the identity
+  // transform (scale=1, offset=0) inFrameBounds is always 1.0 (coverUv's
+  // output never leaves [0,1]), so this is a no-op until the Image/Video
+  // Framing sliders actually move something out of frame.
+  float contentMask = mix(1.0, texture2D(uSource, sampleUv).a, uSourceIsMasked) * inFrameBounds;
 
   // ---- mouse interactivity: local density/contrast boost near the cursor --
   // Aspect-correct the distance: vUv is 0..1 on BOTH axes regardless of the
