@@ -49,10 +49,45 @@
     }
     #gui-left { left: 0; }
     #gui-right { right: 0; }
+
+    /* "Preview frame" (Look & Output -> Preview frame) — a PURELY VISUAL
+       guide overlay, not a render change. The canvas keeps rendering
+       full-bleed exactly as before; this just shows what a fixed-size export
+       (matching a device/artboard preset, e.g. the sizes Unicorn Studio
+       offers) would keep vs. crop, so Scale/Position framing can be dialed in
+       here before moving the settings over to Unicorn for the real capture.
+       See js/main.js's updatePreviewFrame() for the sizing math.
+       - pointer-events: none — never blocks canvas mouse-interaction/drag.
+       - the box-shadow (not a background/overlay div) is what dims the
+         cropped-away area: a huge spread on a border-less box is a standard
+         CSS trick for "spotlight everything outside this rect" without a
+         second absolutely-positioned scrim element to keep in sync. */
+    #preview-frame {
+      position: fixed;
+      pointer-events: none;
+      z-index: 10;
+      display: none;
+      box-sizing: border-box;
+      border: 1px dashed rgba(20, 20, 19, 0.45);
+      box-shadow: 0 0 0 9999px rgba(20, 20, 19, 0.35);
+    }
+    #preview-frame-label {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      color: rgba(20, 20, 19, 0.55);
+      background: rgba(248, 248, 246, 0.75);
+      padding: 2px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
   <canvas id="gl-canvas"></canvas>
+  <div id="preview-frame"><div id="preview-frame-label"></div></div>
 
   <div id="boot-error"></div>
   <div id="gui-left"></div>

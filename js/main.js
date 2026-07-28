@@ -34,6 +34,26 @@ const MODES = {
 };
 
 // ---------------------------------------------------------------------------
+// "Preview frame" (Look & Output -> Preview frame) — PREVIEW ONLY. Deliberately
+// scoped down from a full Unicorn-Studio-style artboard/export system (that
+// would mean decoupling the render target's resolution from the browser
+// window and rebuilding Capture/Record around fixed output sizes — a real
+// production-export pipeline, which is Unicorn's job, not this sandbox's).
+// This just overlays a guide rect matching a target aspect ratio so
+// Scale/Position framing can be sanity-checked against it before moving
+// settings over to Unicorn for the actual capture. Sizes mirror the presets
+// Unicorn's own artboard picker offers, so what you frame here lines up with
+// what you'll pick over there.
+const PREVIEW_FRAME_PRESETS = {
+  "Off": null,
+  "Square (1080×1080)": [1080, 1080],
+  "Window (1512×863)": [1512, 863],
+  "iPhone 14 Pro Max (430×932)": [430, 932],
+  "iPad Pro 11\" (834×1194)": [834, 1194],
+  "MacBook Pro (1440×900)": [1440, 900],
+};
+
+// ---------------------------------------------------------------------------
 // Renderer / display scene (a single full-screen quad running main.frag.glsl)
 // ---------------------------------------------------------------------------
 const canvas = document.getElementById("gl-canvas");
@@ -322,6 +342,7 @@ const NO_PRESETS_LABEL = "— none saved —";
 const PRESET_KEYS = [
   "mode", "cellSize", "invert", "colorMode", "fgColor", "bgColor", "accentColor",
   "accentThreshold", "ditherScale", "dotLevels", "brightness", "contrast", "blur", "glow",
+  "previewFrame",
   "mouseRadius", "mouseStrength", "mouseSmoothing", "trailEnabled", "trailDecay",
   "trailStrength", "magnetEnabled", "magnetRadius", "magnetStrength",
   "autoRotate", "scale", "posX", "posY", "rotX", "rotY", "rotZ",
@@ -570,6 +591,7 @@ const params = {
   contrast: 1.0,
   blur: 0, // px, pre-blur on the source before density/coverage math
   glow: 0, // 0..1, emissive boost on hot cells — see shader comment (not true bloom)
+  previewFrame: "Off", // see PREVIEW_FRAME_PRESETS — visual guide overlay only, no render/export change
   mouseRadius: 0.07,
   mouseStrength: 0.8,
   mouseSmoothing: 0.18, // 0..1, per-frame lerp factor at 60fps — lower = smoother/laggier, 1 = instant/snappy
@@ -949,6 +971,10 @@ async function boot() {
   // README "The lil-gui panel".
   guiLook.add(params, "snapshotPNG").name("📸 Capture (PNG)");
   recordButtonController = guiLook.add(params, "toggleRecording").name("● Start Recording");
+  // Preview-only guide overlay (see PREVIEW_FRAME_PRESETS + updatePreviewFrame
+  // below) — placed right next to Capture/Record since it exists purely to
+  // help frame a shot before capturing, not as a persistent "look" setting.
+  guiLook.add(params, "previewFrame", Object.keys(PREVIEW_FRAME_PRESETS)).name("Preview frame").onChange(updatePreviewFrame);
 
   // placed first on the Session panel — "load a saved experiment" is
   // naturally the first move when you're comparing settings rather than
@@ -1112,6 +1138,47 @@ async function boot() {
   updateUndoRedoLabels();
 
   // -------------------------------------------------------------------------
+  // Preview frame — see PREVIEW_FRAME_PRESETS above for what this is/isn't
+  // (a framing guide, not a render/export change). Pure DOM overlay sizing;
+  // never touches uResolution/renderer/renderTarget, so it can't affect the
+  // actual shader output or Capture/Record in any way.
+  // -------------------------------------------------------------------------
+  const previewFrameEl = document.getElementById("preview-frame");
+  const previewFrameLabelEl = document.getElementById("preview-frame-label");
+  function updatePreviewFrame() {
+    const target = PREVIEW_FRAME_PRESETS[params.previewFrame];
+    if (!target) {
+      previewFrameEl.style.display = "none";
+      return;
+    }
+    const [targetW, targetH] = target;
+    const targetAspect = targetW / targetH;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    // "contain" fit — as large as possible within the viewport without
+    // exceeding it on either axis, preserving the preset's aspect ratio.
+    // Same idea as CSS object-fit: contain / the shader's own coverUv(),
+    // just sizing a DOM rect instead of remapping a UV.
+    let frameW = viewportW;
+    let frameH = frameW / targetAspect;
+    if (frameH > viewportH) {
+      frameH = viewportH;
+      frameW = frameH * targetAspect;
+    }
+    // small margin so the dashed border reads as a floating frame rather
+    // than a stroke sitting flush on the browser edge.
+    const margin = 24;
+    frameW = Math.max(40, frameW - margin * 2);
+    frameH = Math.max(40, frameH - margin * 2);
+    previewFrameEl.style.width = `${frameW}px`;
+    previewFrameEl.style.height = `${frameH}px`;
+    previewFrameEl.style.left = `${(viewportW - frameW) / 2}px`;
+    previewFrameEl.style.top = `${(viewportH - frameH) / 2}px`;
+    previewFrameEl.style.display = "block";
+    previewFrameLabelEl.textContent = `${targetW}×${targetH}`;
+  }
+
+  // -------------------------------------------------------------------------
   // Resize handling
   // -------------------------------------------------------------------------
   function resize() {
@@ -1140,6 +1207,8 @@ async function boot() {
       trailRTB.setSize(trailW, trailH);
     }
     if (trailMaterial) trailMaterial.uniforms.uCanvasAspect.value = canvasAspect;
+
+    updatePreviewFrame();
   }
   window.addEventListener("resize", resize);
   resize();

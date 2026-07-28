@@ -410,6 +410,31 @@ the real Upstash store.
   problem, that's the point where this needs real auth + per-user rows, not
   a bigger version of this same approach.
 
+## Preview frame (framing guide, not export)
+
+**Preview frame** dropdown, top-level on the Look & Output panel (next to
+Capture/Record) — overlays a dashed-border guide rect matching a target
+aspect ratio, with everything outside it dimmed. Presets mirror what Unicorn
+Studio's own artboard picker offers (Square 1080×1080, Window 1512×863,
+iPhone 14 Pro Max, iPad Pro 11", MacBook Pro), so you can sanity-check
+Scale/Position framing against the SAME sizes before moving settings over to
+Unicorn for the real capture.
+
+Deliberately scoped down from a full artboard/export system, decided
+2026-07-28: this is a **pure DOM overlay** (`#preview-frame` in `index.html`,
+sized by `updatePreviewFrame()` in `main.js`) that never touches
+`uResolution`, the renderer, or `renderTarget` — the canvas keeps rendering
+full-bleed exactly as before, and Capture/Record output is completely
+unaffected by whatever the dropdown is set to. Building an actual
+fixed-resolution export pipeline (decoupling render size from the browser
+window, so Capture/Record produce pixel-exact 1080×1080 etc. files) was
+explicitly ruled out as scope creep — that's a real production-export
+capability Unicorn already owns; this sandbox's job is tuning parameters,
+not becoming a second export pipeline. If pixel-exact fixed-size export ever
+becomes a real need, that's a materially bigger change (see "Working
+conventions" above) and should be discussed as its own decision, not bolted
+onto this preview feature.
+
 ## Export
 
 Three independent things. **📸 Capture (PNG)** and **● Start Recording** sit
