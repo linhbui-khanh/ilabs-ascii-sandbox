@@ -34,6 +34,33 @@ const MODES = {
 };
 
 // ---------------------------------------------------------------------------
+// Mode "families" — a purely-UI grouping for the tab bar built in
+// buildModeTabBar() (see the "Effect" folder below). MODES/uMode above stays
+// the single source of truth for what actually renders; this just groups
+// those 8 values into 3 tabs so the Effect folder reads as "pick a family,
+// then (only for Dither) pick which of the 6 algorithms" instead of one flat
+// 8-item dropdown — same information, friendlier information architecture.
+// ---------------------------------------------------------------------------
+const MODE_FAMILIES = {
+  "ASCII (MSDF)": "ASCII",
+  "Smooth Dot": "Smooth Dot",
+  "Bayer 4x4": "Dither",
+  "Bayer 8x8": "Dither",
+  "Bayer 16x16": "Dither",
+  "Blue Noise": "Dither",
+  "IGN": "Dither",
+  "Random (baseline)": "Dither",
+};
+const DITHER_ALGORITHMS = ["Bayer 4x4", "Bayer 8x8", "Bayer 16x16", "Blue Noise", "IGN", "Random (baseline)"];
+// Representative mode to jump to when a family tab is clicked directly
+// (as opposed to picking a specific algorithm from the Dither sub-select).
+const FAMILY_DEFAULT_MODE = {
+  "ASCII": "ASCII (MSDF)",
+  "Dither": "Bayer 8x8",
+  "Smooth Dot": "Smooth Dot",
+};
+
+// ---------------------------------------------------------------------------
 // "Preview frame" (Look & Output -> Preview frame) — PREVIEW ONLY. Deliberately
 // scoped down from a full Unicorn-Studio-style artboard/export system (that
 // would mean decoupling the render target's resolution from the browser
@@ -1061,8 +1088,13 @@ async function boot() {
   });
 
   const modeFolder = guiLook.addFolder("Effect");
-  modeFolder.add(params, "mode", Object.keys(MODES)).name("Mode").onChange((v) => {
+  // kept as the real, functioning controller — still wired into
+  // controllerMap/presets/undo-redo exactly as before. buildModeTabBar()
+  // below hides its native <select> row and drives it via .setValue() from
+  // a tab bar instead, so every existing code path keeps working untouched.
+  const modeController = modeFolder.add(params, "mode", Object.keys(MODES)).name("Mode").onChange((v) => {
     uniforms.uMode.value = MODES[v];
+    syncModeUI();
   });
   modeFolder.add(params, "cellSize", 4, 48, 1).name("Cell size (px)").onChange((v) => {
     uniforms.uCellSize.value = v;
@@ -1070,12 +1102,82 @@ async function boot() {
   modeFolder.add(params, "invert").name("Invert").onChange((v) => {
     uniforms.uInvert.value = v ? 1 : 0;
   });
-  modeFolder.add(params, "ditherScale", 0.25, 4, 0.05).name("Blue noise scale").onChange((v) => {
+  // both of the next two rows are mode-specific — only meaningful for one
+  // mode/family each — so buildModeTabBar()'s syncModeUI() show/hides their
+  // rows based on the active mode instead of leaving them always visible.
+  const ditherScaleController = modeFolder.add(params, "ditherScale", 0.25, 4, 0.05).name("Blue noise scale").onChange((v) => {
     uniforms.uDitherScale.value = v;
   });
-  modeFolder.add(params, "dotLevels", 2, 16, 1).name("Dot levels (Smooth Dot)").onChange((v) => {
+  const dotLevelsController = modeFolder.add(params, "dotLevels", 2, 16, 1).name("Dot levels (Smooth Dot)").onChange((v) => {
     uniforms.uDotLevels.value = v;
   });
+
+  // -------------------------------------------------------------------------
+  // Mode tab bar — a custom view layered on top of the real "Mode" controller
+  // above, replacing one flat 8-item dropdown with 3 tabs (ASCII / Dither /
+  // Smooth Dot) plus a secondary dropdown that only appears for Dither, to
+  // pick which of its 6 algorithms is active. The controller stays the
+  // single source of truth: every tab/select interaction below just calls
+  // modeController.setValue(...), so presets, undo/redo, and the uMode
+  // uniform wiring all keep working exactly as before, no matter which UI
+  // path changed params.mode. syncModeUI() (called from modeController's own
+  // onChange above) is what keeps the tab bar highlighting, the dither
+  // sub-select's visibility/value, and the two mode-specific rows above in
+  // sync — covering ALL paths that can change params.mode (tab bar clicks,
+  // preset load, undo/redo), not just direct tab-bar interaction.
+  // -------------------------------------------------------------------------
+  let syncModeUI = () => {}; // replaced once buildModeTabBar() runs; see modeController.onChange above
+  function buildModeTabBar() {
+    const modeRow = modeController.domElement.closest(".controller");
+    modeRow.classList.add("mode-row-hidden"); // controller stays alive/functional, just visually replaced
+
+    const tabBar = document.createElement("div");
+    tabBar.className = "mode-tabbar";
+    const families = ["ASCII", "Dither", "Smooth Dot"];
+    const tabButtons = {};
+    families.forEach((family) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mode-tab";
+      btn.textContent = family;
+      btn.addEventListener("click", () => {
+        const nextMode = MODE_FAMILIES[params.mode] === family ? params.mode : FAMILY_DEFAULT_MODE[family];
+        modeController.setValue(nextMode); // -> uMode uniform + syncModeUI(), via the onChange above
+        pushHistory(); // explicit call — don't rely on setValue() bubbling to guiLook.onFinishChange
+      });
+      tabButtons[family] = btn;
+      tabBar.appendChild(btn);
+    });
+
+    const ditherSelect = document.createElement("select");
+    ditherSelect.className = "mode-dither-select";
+    DITHER_ALGORITHMS.forEach((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      ditherSelect.appendChild(opt);
+    });
+    ditherSelect.addEventListener("change", () => {
+      modeController.setValue(ditherSelect.value);
+      pushHistory();
+    });
+
+    modeRow.insertAdjacentElement("afterend", ditherSelect);
+    modeRow.insertAdjacentElement("afterend", tabBar);
+
+    syncModeUI = () => {
+      const family = MODE_FAMILIES[params.mode];
+      families.forEach((f) => tabButtons[f].classList.toggle("active", f === family));
+      ditherSelect.style.display = family === "Dither" ? "block" : "none";
+      if (family === "Dither") ditherSelect.value = params.mode;
+      const ditherScaleRow = ditherScaleController.domElement.closest(".controller");
+      const dotLevelsRow = dotLevelsController.domElement.closest(".controller");
+      ditherScaleRow.classList.toggle("mode-row-hidden", params.mode !== "Blue Noise");
+      dotLevelsRow.classList.toggle("mode-row-hidden", params.mode !== "Smooth Dot");
+    };
+    syncModeUI();
+  }
+  buildModeTabBar();
 
   const colorFolder = guiLook.addFolder("Color");
   colorFolder.add(params, "colorMode", ["Grayscale", "RGB"]).name("Color mode").onChange((v) => {

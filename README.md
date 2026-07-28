@@ -666,8 +666,9 @@ actually spend most of a tuning session):
   mirror how Efecto and most premium editors separate ACTIONS you take once
   you're happy from SETTINGS you tune repeatedly — these are the actual
   triggers, always one click away without opening a folder.
-- **Effect** — mode dropdown, cell size, invert, blue-noise scale (scramble
-  reveal on load and idle shimmer were both removed — see Known limitations)
+- **Effect** — Mode tab bar (ASCII / Dither / Smooth Dot, see "GUI reskin"
+  below), cell size, invert, blue-noise scale, dot levels (scramble reveal on
+  load and idle shimmer were both removed — see Known limitations)
 - **Color** — color mode, background/foreground/accent + accent luminance
   threshold
 - **Filters** — brightness/contrast/blur/glow (see "Color mode + filters"
@@ -708,6 +709,62 @@ adding them would mean pulling in three's `OBJLoader`/`STLLoader` the same
 way; ask if you need those formats too. The input resets its own `.value`
 after reading the file, since otherwise the browser won't fire `change`
 again if you pick the exact same file a second time.
+
+## GUI reskin + Mode tab bar (2026-07-28)
+
+Two changes shipped together after weighing options against efecto.app's UI
+(see "Working conventions" — this was a Tier 1 scope call, confirmed before
+any code was written):
+
+**1. Visual reskin.** CSS-only, layered on lil-gui's own theming API (the
+`--background-color`/`--widget-color`/etc. custom properties, see
+`index.html`'s `.lil-gui` rule) plus a few targeted rules for things lil-gui
+doesn't expose a variable for:
+- Boolean controllers (Invert, Enable trail, Auto-rotate, ...) render as
+  iOS-style toggle switches instead of lil-gui's default checkbox — still a
+  real `<input type="checkbox">` underneath, purely `appearance: none` +
+  `::before` for the knob, so state/onChange/presets/undo-redo are untouched.
+- Folder titles ("Effect", "Color", "Filters", ...) softened from a filled bar
+  into a quiet uppercase label; the two root panel titles ("Session" / "Look
+  & Output") stay a bit bolder since they're the top-level sections.
+- Slightly larger type (11px → 12px), rounder corners on selects/sliders/
+  buttons, a touch more row padding.
+- Kept the tool's own brand accent (`--accent`, `#ff451a`) for "on"/active
+  states rather than cloning efecto's monochrome look — same interaction
+  patterns, our own identity.
+- Explicitly out of scope: a media library/asset browser, account/avatar UI,
+  cloud-sync icon — ruled out when this was scoped, not omitted by accident.
+
+**2. Mode tab bar.** The single 8-item "Mode" dropdown in the Effect folder
+read as one flat list with no sense of "what kind of effect am I even in."
+Replaced (visually) with 3 tabs — **ASCII** / **Dither** / **Smooth Dot** —
+plus a secondary dropdown that only appears under the Dither tab, listing its
+6 algorithms (Bayer 4x4/8x8/16x16, Blue Noise, IGN, Random).
+
+Implementation, `js/main.js`'s `buildModeTabBar()`: the real `mode` lil-gui
+controller is NOT replaced — it's kept fully alive (still driving
+`uniforms.uMode`, still in `controllerMap` for presets/undo-redo) and just
+visually hidden (`.mode-row-hidden`). The tab bar and dither `<select>` are
+plain DOM elements inserted right after its row; clicking a tab or picking an
+algorithm calls `modeController.setValue(...)`, which is the same "change the
+mode" code path as the old dropdown — so no logic duplication. `syncModeUI()`
+re-reads `MODE_FAMILIES[params.mode]` to highlight the right tab, show/hide
+the dither sub-select, and show/hide the two mode-specific rows ("Blue noise
+scale" only for Blue Noise, "Dot levels" only for Smooth Dot). It's called
+from the mode controller's own `onChange`, which fires no matter what changed
+`params.mode` — tab click, dither sub-select, preset load, or undo/redo — so
+there's one sync path instead of one per trigger. Tab/select clicks also
+explicitly call `pushHistory()` rather than assuming `setValue()` bubbles into
+`guiLook.onFinishChange()` (untested assumption otherwise, and undo-history
+gaps are cheap to prevent but annoying to debug after the fact).
+
+**Not yet browser-verified.** Chrome automation runs against the user's real
+browser, which can't reach this sandbox's local filesystem — testing this
+needs either a push + Vercel redeploy, or `npx serve .` run directly on your
+own machine (not from this environment). Reviewed via `node --check`, a CSS
+brace-balance check, and re-tracing every DOM selector (`.controller`,
+`.controller.boolean`, `modeController.domElement`) against the live DOM
+dump captured earlier in this session — but please eyeball it once deployed.
 
 ## Re-baking the MSDF atlas (`tools/msdf-bake/`)
 

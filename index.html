@@ -34,7 +34,153 @@
       font-size: 12px; border-radius: 4px; z-index: 999;
     }
     input[type="file"] { display: none; }
-    .lil-gui { --width: 300px; }
+
+    /* ---------------------------------------------------------------------
+       GUI reskin — "Tier 1" pass (2026-07-28): friendlier dark theme for the
+       lil-gui panels + a custom Mode tab bar (see js/main.js's
+       buildModeTabBar()). Deliberately keeps lil-gui's own DOM/JS untouched —
+       everything here is CSS-only, layered on top of lil-gui's existing
+       custom-property theming API (the --xxx-color vars) plus a few targeted
+       rules for controls lil-gui doesn't expose a variable for (checkbox ->
+       toggle switch, folder title treatment, row spacing). Kept the tool's
+       OWN brand accent (--accent, #ff451a) for the "on"/active states rather
+       than cloning efecto's monochrome palette outright — same interaction
+       patterns (toggle switches, tab bar, breathing room), our own identity.
+       Explicitly NOT in this pass (out of scope, see README "Working
+       conventions"): a media library/asset browser, account/avatar UI,
+       cloud-sync icon — those were ruled out when this was scoped. */
+    .lil-gui {
+      --width: 300px;
+      --background-color: #161615;
+      --title-background-color: #0c0c0b;
+      --widget-color: #262624;
+      --hover-color: #333330;
+      --focus-color: #3d3d39;
+      --text-color: #ececE8;
+      --title-text-color: #ececE8;
+      --font-size: 12px;
+      --input-font-size: 12px;
+      --padding: 7px;
+      --spacing: 7px;
+      --widget-height: 20px;
+    }
+    /* the two root panels (Session / Look & Output) get a slightly bolder
+       title than nested folder titles below, since they're the top-level
+       "sections" of the whole tool, not a collapsible sub-group. */
+    .lil-gui.root > .title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      opacity: 1;
+    }
+    /* nested folder titles ("Effect", "Color", "Filters", ...) — softened
+       from lil-gui's default filled bar into a quieter, uppercase small-caps
+       label so the panel reads as calm sections rather than stacked boxes. */
+    .lil-gui .lil-gui .title {
+      font-size: 10.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.62;
+      transition: opacity 0.15s ease;
+    }
+    .lil-gui .lil-gui .title:hover { opacity: 1; }
+    .lil-gui .controller { padding-block: 3px; }
+    .lil-gui select,
+    .lil-gui input[type="text"],
+    .lil-gui input[type="number"],
+    .lil-gui .slider,
+    .lil-gui button {
+      border-radius: 6px !important;
+    }
+
+    /* Boolean controllers (Invert, Enable trail, Auto-rotate, ...) — restyle
+       the native checkbox as an iOS-style toggle switch instead of lil-gui's
+       default tick box. Real <input type="checkbox">, so state/onChange/
+       presets/undo-redo all keep working exactly as before — appearance
+       only. */
+    .lil-gui .controller.boolean .widget input[type="checkbox"] {
+      -webkit-appearance: none;
+      appearance: none;
+      position: relative;
+      width: 34px;
+      height: 18px;
+      min-width: 34px;
+      margin: 0;
+      border-radius: 999px;
+      background: var(--widget-color);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      cursor: pointer;
+      outline: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .lil-gui .controller.boolean .widget input[type="checkbox"]::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #cfcfcb;
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+    .lil-gui .controller.boolean .widget input[type="checkbox"]:checked {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .lil-gui .controller.boolean .widget input[type="checkbox"]:checked::before {
+      transform: translateX(16px);
+      background: #141413;
+    }
+    .lil-gui .controller.boolean .widget input[type="checkbox"]:focus-visible {
+      box-shadow: 0 0 0 2px rgba(255, 69, 26, 0.35);
+    }
+
+    /* Mode tab bar + Dither sub-select — DOM built/inserted by
+       buildModeTabBar() in js/main.js, right where the native "Mode"
+       dropdown used to sit (that controller/row still exists underneath,
+       just hidden via .mode-row-hidden — see JS comment for why). */
+    .mode-row-hidden { display: none !important; }
+    .mode-tabbar {
+      display: flex;
+      gap: 4px;
+      margin: 6px 8px 4px;
+      padding: 3px;
+      background: var(--title-background-color);
+      border-radius: 8px;
+    }
+    .mode-tab {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: rgba(236, 236, 232, 0.55);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 0.01em;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .mode-tab:hover { color: rgba(236, 236, 232, 0.85); }
+    .mode-tab.active {
+      background: var(--accent);
+      color: #141413;
+      font-weight: 600;
+    }
+    .mode-dither-select {
+      display: none; /* toggled via JS depending on active tab */
+      width: calc(100% - 16px);
+      margin: 0 8px 8px;
+      background: var(--widget-color);
+      color: var(--text-color);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 11px;
+      padding: 5px 8px;
+      cursor: pointer;
+    }
     /* Two docked GUI panels instead of one long scrolling column — see
        js/main.js's "GUI" section (guiSession / guiLook) for what lives in
        each. Both fixed to the full viewport height and independently
