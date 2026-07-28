@@ -6,6 +6,20 @@ work. **This is not the production implementation** — it's a standalone tool
 for understanding the technique and handing working code to a developer who
 will port the relevant pieces into the live Webflow site.
 
+## Working conventions
+
+- **Bug fixes / tweaks within the already-agreed direction**: fix and ship
+  directly — this has been the working pattern throughout the project (dot
+  flicker, accent-threshold checkering, density-gamma, Smooth Dot mode, etc.
+  were all diagnosed, fixed, committed, and reported after the fact).
+- **Scope/architecture-level questions** — "should this tool grow capability
+  X," "should we duplicate/match something [reference tool] does," "which of
+  these approaches" — are a different category: give a direct recommendation
+  and flag the couple of decisions that change scope/effort, then WAIT for
+  explicit go-ahead before writing any code. Don't implement speculatively.
+  (Established 2026-07-28 re: whether to add a Unicorn-Studio-style
+  artboard/size-preset system to this sandbox.)
+
 ## Running it
 
 Any static file server works — the app fetches shader source and the MSDF
